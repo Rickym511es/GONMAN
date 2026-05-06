@@ -160,11 +160,11 @@ while ~success && retry_count < maxretries
     ber = bit_errors / numel(tx_bits);
     fprintf("BER = %3f\n", ber);
 
-    if ber > 0.2
-       fprintf("BER too high, NAK\n");
-       success = 0;
-       continue;
-    end 
+    % if ber > 0.2
+    %    fprintf("BER too high, NAK\n");
+    %    success = 0;
+    %    continue;
+    % end 
 end
 plot_td_signal(rx_frame, fs, 'Received Wi-Fi OFDM Frame', 'Real');
 
@@ -312,7 +312,7 @@ fprintf("BER = %3f\n", ber);
 
 %(10)
 %(10)
-%% =========================================================================
+% =========================================================================
 % (10) Change the modulation to 16-QAM and repeat the experiment
 % =========================================================================
 % 這題要把 modulation 改成 16-QAM，重新傳送與接收一個 frame。
@@ -330,9 +330,9 @@ fprintf("BER = %3f\n", ber);
 
 qam_num_16 = 16;
 
-%% -------------------------------------------------------------------------
+% -------------------------------------------------------------------------
 % Generate 16-QAM OFDM frame
-%% -------------------------------------------------------------------------
+% -------------------------------------------------------------------------
 [ofdm_data_16, tx_bits_16, tx_data_syms_16, pilot_syms_16] = ...
     gen_ofdm_data(num_ofdm_symbols, qam_num_16);
 
@@ -363,14 +363,14 @@ fprintf("\n================ Q10: 16-QAM Transmission ================\n");
 fprintf("16-QAM frame length = %d samples\n", length(tx_frame_16));
 fprintf("16-QAM rx length    = %d samples\n", rx_length_16);
 
-%% -------------------------------------------------------------------------
+% -------------------------------------------------------------------------
 % Re-initialize USRP for 16-QAM experiment
-%% -------------------------------------------------------------------------
+% -------------------------------------------------------------------------
 [radio_Tx, radio_Rx] = USRP_init(fc, tx_gain, rx_gain, rx_length_16, OFDM_sr);
 
-%% -------------------------------------------------------------------------
+% -------------------------------------------------------------------------
 % Multi-tries transmission and frame detection
-%% -------------------------------------------------------------------------
+% -------------------------------------------------------------------------
 match_filter_16 = conj(flipud(sts_16));
 
 buffer_16 = zeros(rx_length_16, 1);
@@ -458,9 +458,9 @@ if ~success_16
     error("Q10 failed: Cannot detect complete 16-QAM frame.");
 end
 
-%% -------------------------------------------------------------------------
+% -------------------------------------------------------------------------
 % Extract the received 16-QAM frame
-%% -------------------------------------------------------------------------
+% -------------------------------------------------------------------------
 rx_frame_16 = buffer_16(frame_start_16:frame_end_16);
 
 fprintf("16-QAM frame_start = %d\n", frame_start_16);
@@ -471,9 +471,9 @@ plot_td_signal(rx_frame_16, fs, ...
     'Q10: Received 16-QAM OFDM Frame', ...
     'Real');
 
-%% -------------------------------------------------------------------------
+% -------------------------------------------------------------------------
 % CFO estimation using STS
-%% -------------------------------------------------------------------------
+% -------------------------------------------------------------------------
 fs_CFO = OFDM_sr;
 D_sts = 16;
 
@@ -488,16 +488,16 @@ cfo_est_16 = angle(P_sts_16) * fs_CFO / (2*pi*D_sts);
 
 fprintf("Estimated CFO from STS for 16-QAM = %.2f Hz\n", cfo_est_16);
 
-%% -------------------------------------------------------------------------
+% -------------------------------------------------------------------------
 % CFO correction
-%% -------------------------------------------------------------------------
+% -------------------------------------------------------------------------
 n_16 = (0:length(rx_frame_16)-1).';
 
 rx_frame_cfo_16 = rx_frame_16 .* exp(-1j * 2*pi * cfo_est_16 * n_16 / fs_CFO);
 
-%% -------------------------------------------------------------------------
+% -------------------------------------------------------------------------
 % Channel estimation using LTS after CFO correction
-%% -------------------------------------------------------------------------
+% -------------------------------------------------------------------------
 % Known LTS in frequency domain
 lts_f_known_16 = fftshift(fft(lts_16(33:96)));
 
@@ -514,9 +514,9 @@ H2_cfo_16 = estimateChannelFromLTS(rx_lts_2_cfo_16, lts_f_known_16);
 % Average two LTS channel estimates
 H_cfo_16 = (H1_cfo_16 + H2_cfo_16) / 2;
 
-%% -------------------------------------------------------------------------
+% -------------------------------------------------------------------------
 % Extract OFDM symbols after CFO correction
-%% -------------------------------------------------------------------------
+% -------------------------------------------------------------------------
 data_start_16 = pad_len + length(sts_16) + length(lts_16) + 1;
 
 rx_symbols_cfo_16 = extractOFDMSymbols( ...
@@ -526,9 +526,9 @@ rx_symbols_cfo_16 = extractOFDMSymbols( ...
     cp_size, ...
     num_ofdm_symbols);
 
-%% -------------------------------------------------------------------------
+% -------------------------------------------------------------------------
 % Equalization without pilot-assisted correction
-%% -------------------------------------------------------------------------
+% -------------------------------------------------------------------------
 rx_data_cfo_16 = zeros(length(data_sc), num_ofdm_symbols);
 
 for k = 1:num_ofdm_symbols
@@ -552,9 +552,9 @@ end
 plotConstellation(rx_data_cfo_16, ...
     'Q10: 16-QAM Constellation after CFO Correction and Equalization');
 
-%% -------------------------------------------------------------------------
+% -------------------------------------------------------------------------
 % Pilot-assisted residual phase correction
-%% -------------------------------------------------------------------------
+% -------------------------------------------------------------------------
 pilot_idx = sc2idx(pilot_sc);
 
 rx_data_pilot_16 = zeros(length(data_sc), num_ofdm_symbols);
@@ -596,32 +596,30 @@ plotConstellation(rx_data_pilot_16, ...
     'Q10: 16-QAM Pilot-Assisted Received Constellation', ...
     tx_data_syms_16(:));
 
-
-
 fprintf("Q10 finished: 16-QAM CFO correction, equalization, and pilot-assisted constellation plotted.\n");
 
 %(11)
-%% =========================================================================
+% =========================================================================
 % (11) Calculate BER for 16-QAM and compare with 4-QAM
-%% =========================================================================
+% =========================================================================
 % Q11 要做的事情：
 %   1. 將 Q10 pilot-assisted correction 後的 16-QAM symbols 解調成 bits
 %   2. 跟原本傳送的 tx_bits_16 比較
 %   3. 算出 16-QAM BER
 %   4. 跟 Q9 的 4-QAM BER 比較
 
-%% -------------------------------------------------------------------------
+% -------------------------------------------------------------------------
 % Save 4-QAM BER from Q9
-%% -------------------------------------------------------------------------
+% -------------------------------------------------------------------------
 % 前面 Q9 算完後，變數 ber 代表 4-QAM BER。
 % 為了避免後面被覆蓋，先存成 ber_4qam。
 if exist('ber_4qam', 'var') == 0
     ber_4qam = ber;
 end
 
-%% -------------------------------------------------------------------------
+% -------------------------------------------------------------------------
 % Demodulate 16-QAM received symbols
-%% -------------------------------------------------------------------------
+% -------------------------------------------------------------------------
 bits_per_symbol_16 = log2(qam_num_16);
 
 % rx_data_pilot_16 size:
@@ -644,17 +642,17 @@ for k = 1:num_ofdm_symbols
     rx_bits_16(:, k) = rx_bits_16_k(:);
 end
 
-%% -------------------------------------------------------------------------
+%-------------------------------------------------------------------------
 % Calculate 16-QAM BER
-%% -------------------------------------------------------------------------
+% -------------------------------------------------------------------------
 % tx_bits_16 是 Q10 產生的 transmitted bits
 bit_errors_16 = sum(rx_bits_16(:) ~= tx_bits_16(:));
 
 ber_16qam = bit_errors_16 / numel(tx_bits_16);
 
-%% -------------------------------------------------------------------------
+% -------------------------------------------------------------------------
 % Print results
-%% -------------------------------------------------------------------------
+% -------------------------------------------------------------------------
 fprintf("\n================ Q11 BER Comparison ================\n");
 fprintf("4-QAM  BER from Q9  = %.6f\n", ber_4qam);
 fprintf("16-QAM BER from Q11 = %.6f\n", ber_16qam);
@@ -670,15 +668,379 @@ else
     fprintf("Observation: 16-QAM BER is the same as 4-QAM BER in this trial.\n");
 end
 
-%% -------------------------------------------------------------------------
+% -------------------------------------------------------------------------
 % Optional: bar plot comparing 4-QAM and 16-QAM BER
-%% -------------------------------------------------------------------------
+% -------------------------------------------------------------------------
 figure;
 bar([ber_4qam, ber_16qam]);
 grid on;
 set(gca, 'XTickLabel', {'4-QAM', '16-QAM'});
 ylabel('BER');
 title('Q11: BER Comparison between 4-QAM and 16-QAM');
+
+% (12)
+validtrans = 0;
+frame_num = 20;
+BER_plot = zeros(frame_num,1);
+% parameters for Q(13)
+M = 16;
+bits_per_qam = log2(M);        
+num_data_sc = length(data_sc); 
+sc_err_cnt = zeros(num_data_sc, 1);
+sc_bit_cnt = zeros(num_data_sc, 1);
+
+while validtrans < frame_num
+    [ofdm_data, tx_bits, tx_data_syms, pilot_syms] = gen_ofdm_data(num_ofdm_symbols, 16);
+    ofdm_data = ofdm_data / rms(ofdm_data);
+    
+    pad_len = 500;
+    tx_frame = [zeros(pad_len,1); sts; lts; ofdm_data; zeros(pad_len,1)];
+    tx_frame = tx_frame/abs(max(tx_frame));
+
+    % transmit each frame with 10 copies
+    N_repeat = 10;
+    data = repmat(tx_frame, N_repeat, 1);
+    % multi-tries transmission
+    % Matched filter for STS detection
+    match_filter = conj(flipud(sts));
+    
+    % Variables for repeated transmission
+    buffer = zeros(rx_length, 1);
+    tunderrun = 0;
+    toverflow = 0;
+    start_point = 0;
+    success = 0;
+    retry_count = 0;
+    
+    % parameter can be altered
+    maxattempts = 50;
+    threshold = 0.003 * length(sts) * mean(abs(sts).^2);
+ 
+    for attempt = 1:maxattempts
+        % Transmit the generated frame
+        tunderrun = radio_Tx(data);
+    
+        % Receive signal
+        [received_signal, ~, toverflow] = step(radio_Rx);
+        
+        if toverflow
+            continue;
+        end
+    
+        % STS matched filter
+        corr = abs(conv(received_signal, match_filter));
+        maxval = max(corr);
+    
+        if maxval >= threshold
+    
+            % Store received signal
+            buffer(:,1) = received_signal;
+    
+            % Find the approximate STS position
+            [~, peak_idx] = max(corr);
+    
+            % Since the matched filter peak appears near the matched segment,
+            % estimate the STS start point from the peak position
+            sts_start = peak_idx - 160 + 1;
+    
+            % The transmitted frame has pad_len zeros before STS
+            frame_start = sts_start - pad_len;
+            frame_end = frame_start + length(tx_frame) - 1;
+    
+            start_point = frame_start;
+            
+            if frame_start < 1 || frame_end > length(received_signal)
+                continue;
+            end
+            
+            success = 1;
+            break
+        else
+            % fprintf("Attempt %d: max corr = %.6f\n", attempt, maxval);
+        end
+    end
+    
+    if success
+        fprintf("GON GON\n")
+    else
+        fprintf("Attempt TOO MANY TIMES, restarting usrp!\n");
+        release(radio_Tx);
+        release(radio_Rx);
+        [radio_Tx, radio_Rx] = USRP_init(fc, tx_gain, rx_gain, rx_length, OFDM_sr);
+        continue;
+    end
+    
+    % Extract received frame
+    rx_frame = buffer(start_point:frame_end);
+    
+    % Extract OFDM symbols
+    data_start = pad_len  + length(sts) + length(lts) + 1;
+    rx_symbols = extractOFDMSymbols(rx_frame, data_start, FFT_size, cp_size, num_ofdm_symbols);
+    
+    % Demodulate data tones into bits
+    rx_bits = zeros(4*length(data_sc), num_ofdm_symbols);
+    lts_f_known = fftshift(fft(lts(33:96)));
+    first_lts_start = pad_len + length(sts) + 33;
+    rx_lts_1 = extractLTS(rx_frame, first_lts_start, 1, FFT_size);
+    H1 = estimateChannelFromLTS(rx_lts_1, lts_f_known);
+    
+    rx_data = zeros(length(data_sc), num_ofdm_symbols);
+    for k = 1:num_ofdm_symbols
+        % Remove CP + FFT + fftshift
+        Y = ofdmDemodSymbol(rx_symbols(:, k), FFT_size, cp_size);
+        
+        % Equalization
+        X_hat = equalizeSymbol(Y, H1);
+    
+        % Only take data subcarriers, not pilots
+        rx_data_syms_bn = X_hat(data_idx);
+        rx_data_syms = rx_data_syms_bn / sqrt(mean(abs(rx_data_syms_bn).^2)); %%% normalized the power to 1
+        rx_data(:, k) = rx_data_syms(:); 
+
+        % 4-QAM demodulation
+        rx_bits_k = qamdemod(rx_data_syms, 16, 'OutputType', 'bit','UnitAveragePower', true);
+    
+        rx_bits(:, k) = rx_bits_k(:);
+    end
+    
+    % Check BER of this frame
+    bit_errors = sum(rx_bits(:) ~= tx_bits(:));
+    
+    %%% discarding ass frame %%%
+    ber = bit_errors / numel(tx_bits);
+    fprintf("BER = %3f\n", ber);
+   
+    frame_idx = validtrans + 1;
+
+    BER_plot(frame_idx) = ber;
+    
+    % Calculate BER for each data subcarrier in this frame
+    for sc_i = 1:num_data_sc
+        bit_row_start = (sc_i - 1) * bits_per_qam + 1;
+        bit_row_end   = sc_i * bits_per_qam;
+    
+        rx_sc_bits = rx_bits(bit_row_start:bit_row_end, :); % 4 x 100
+        tx_sc_bits = tx_bits(bit_row_start:bit_row_end, :); % 4 x 100
+    
+        sc_err_cnt(sc_i) = sc_err_cnt(sc_i) + sum(rx_sc_bits ~= tx_sc_bits, 'all');
+        sc_bit_cnt(sc_i) = sc_bit_cnt(sc_i) + numel(tx_sc_bits);
+    end
+
+    % if ber > 0.2
+    %    fprintf("BER too high, NAK\n");
+    %    success = 0;
+    %    continue;
+    % end 
+    validtrans = validtrans + 1;
+    % plot_td_signal(rx_frame, fs, 'Received Wi-Fi OFDM Frame', 'Real');
+end
+
+frame_axis = 1:validtrans;
+
+figure;
+plot(frame_axis, BER_plot(1:validtrans), '-o', 'LineWidth', 1.5);
+grid on;
+xlabel('Frame Number');
+ylabel('BER');
+title('BER per Frame');
+
+total_BER = mean(BER_plot(1:validtrans));
+fprintf("Total BER over %d valid frames = %.6f\n", validtrans, total_BER);
+
+%(13)
+BER_per_subcarrier = sc_err_cnt ./ sc_bit_cnt;  
+
+figure;
+stem(data_sc, BER_per_subcarrier, 'filled', 'LineWidth', 1.2);
+grid on;
+xlabel('Subcarrier Index');
+ylabel('BER');
+title('BER per Subcarrier over 20 Frames');
+
+% % description TBD
+
+%(14)
+distance_num = 3;
+BER_distance = zeros(distance_num,1);
+distance_record = zeros(distance_num, 1);
+
+for d_idx = 1:distance_num
+    % initialization for every distance
+    validtrans = 0;
+    % reset usrp for each case
+    release(radio_Tx);
+    release(radio_Rx);
+    [radio_Tx, radio_Rx] = USRP_init(fc, tx_gain, rx_gain, rx_length, OFDM_sr);
+
+    % TODO1: input the distance from the computer
+    fprintf("\n====================================\n");
+    fprintf("Distance test %d / %d\n", d_idx, distance_num);
+    fprintf("Move TX/RX devices now.\n");
+    fprintf("After measuring the distance, enter it below.\n");
+    fprintf("====================================\n");
+
+    distance_record(d_idx) = input("Enter measured distance in meters: ");
+    fprintf("Start transmitting 20 frames at distance = %.2f m\n", distance_record(d_idx));
+
+    while validtrans < frame_num
+        [ofdm_data, tx_bits, tx_data_syms, pilot_syms] = gen_ofdm_data(num_ofdm_symbols, 16);
+        ofdm_data = ofdm_data / rms(ofdm_data);
+        
+        pad_len = 500;
+        tx_frame = [zeros(pad_len,1); sts; lts; ofdm_data; zeros(pad_len,1)];
+        tx_frame = tx_frame/abs(max(tx_frame));
+    
+        % transmit each frame with 10 copies
+        N_repeat = 10;
+        data = repmat(tx_frame, N_repeat, 1);
+        % multi-tries transmission
+        % Matched filter for STS detection
+        match_filter = conj(flipud(sts));
+        
+        % Variables for repeated transmission
+        buffer = zeros(rx_length, 1);
+        tunderrun = 0;
+        toverflow = 0;
+        start_point = 0;
+        success = 0;
+        retry_count = 0;
+        
+        % parameter can be altered
+        maxattempts = 50;
+        threshold = 0.003 * length(sts) * mean(abs(sts).^2);
+     
+        for attempt = 1:maxattempts
+            % Transmit the generated frame
+            tunderrun = radio_Tx(data);
+        
+            % Receive signal
+            [received_signal, ~, toverflow] = step(radio_Rx);
+            
+            if toverflow
+                continue;
+            end
+        
+            % STS matched filter
+            corr = abs(conv(received_signal, match_filter));
+            maxval = max(corr);
+        
+            if maxval >= threshold
+        
+                % Store received signal
+                buffer(:,1) = received_signal;
+        
+                % Find the approximate STS position
+                [~, peak_idx] = max(corr);
+        
+                % Since the matched filter peak appears near the matched segment,
+                % estimate the STS start point from the peak position
+                sts_start = peak_idx - 160 + 1;
+        
+                % The transmitted frame has pad_len zeros before STS
+                frame_start = sts_start - pad_len;
+                frame_end = frame_start + length(tx_frame) - 1;
+        
+                start_point = frame_start;
+                
+                if frame_start < 1 || frame_end > length(received_signal)
+                    continue;
+                end
+                
+                success = 1;
+                break
+            else
+                % fprintf("Attempt %d: max corr = %.6f\n", attempt, maxval);
+            end
+        end
+        
+        if success
+            fprintf("GON GON\n")
+        else
+            fprintf("Attempt TOO MANY TIMES, restarting usrp!\n");
+            release(radio_Tx);
+            release(radio_Rx);
+            [radio_Tx, radio_Rx] = USRP_init(fc, tx_gain, rx_gain, rx_length, OFDM_sr);
+            continue;
+        end
+        
+        % Extract received frame
+        rx_frame = buffer(start_point:frame_end);
+        
+        % Extract OFDM symbols
+        data_start = pad_len  + length(sts) + length(lts) + 1;
+        rx_symbols = extractOFDMSymbols(rx_frame, data_start, FFT_size, cp_size, num_ofdm_symbols);
+        
+        % Demodulate data tones into bits
+        rx_bits = zeros(4*length(data_sc), num_ofdm_symbols);
+        lts_f_known = fftshift(fft(lts(33:96)));
+        first_lts_start = pad_len + length(sts) + 33;
+        rx_lts_1 = extractLTS(rx_frame, first_lts_start, 1, FFT_size);
+        H1 = estimateChannelFromLTS(rx_lts_1, lts_f_known);
+        
+        rx_data = zeros(length(data_sc), num_ofdm_symbols);
+        for k = 1:num_ofdm_symbols
+            % Remove CP + FFT + fftshift
+            Y = ofdmDemodSymbol(rx_symbols(:, k), FFT_size, cp_size);
+            
+            % Equalization
+            X_hat = equalizeSymbol(Y, H1);
+        
+            % Only take data subcarriers, not pilots
+            rx_data_syms_bn = X_hat(data_idx);
+            
+            rx_data_syms = rx_data_syms_bn / sqrt(mean(abs(rx_data_syms_bn).^2)); %%% normalized the power to 1
+            rx_data(:, k) = rx_data_syms(:); 
+    
+            % 4-QAM demodulation
+            rx_bits_k = qamdemod(rx_data_syms, 16, 'OutputType', 'bit','UnitAveragePower', true);
+        
+            rx_bits(:, k) = rx_bits_k(:);
+        end
+        
+        % Check BER of this frame
+        bit_errors = sum(rx_bits(:) ~= tx_bits(:));
+        
+        %%% discarding ass frame %%%
+        ber = bit_errors / numel(tx_bits);
+        fprintf("BER = %3f\n", ber);
+       
+        frame_idx = validtrans + 1;
+    
+        BER_plot(frame_idx) = ber;
+        
+        % Calculate BER for each data subcarrier in this frame
+        for sc_i = 1:num_data_sc
+            bit_row_start = (sc_i - 1) * bits_per_qam + 1;
+            bit_row_end   = sc_i * bits_per_qam;
+        
+            rx_sc_bits = rx_bits(bit_row_start:bit_row_end, :); % 4 x 100
+            tx_sc_bits = tx_bits(bit_row_start:bit_row_end, :); % 4 x 100
+        
+            sc_err_cnt(sc_i) = sc_err_cnt(sc_i) + sum(rx_sc_bits ~= tx_sc_bits, 'all');
+            sc_bit_cnt(sc_i) = sc_bit_cnt(sc_i) + numel(tx_sc_bits);
+        end
+    
+        % if ber > 0.2
+        %    fprintf("BER too high, NAK\n");
+        %    success = 0;
+        %    continue;
+        % end 
+        validtrans = validtrans + 1;
+        % plot_td_signal(rx_frame, fs, 'Received Wi-Fi OFDM Frame', 'Real');
+    end
+    total_BER = mean(BER_plot(1:validtrans));
+    % TODO2: store total BER at this distance
+    BER_distance(d_idx) = total_BER;
+    fprintf("Finished distance %.2f m, total BER = %.6f\n", distance_record(d_idx), BER_distance(d_idx));
+end
+
+% TODO3: plot BER vs distance
+figure;
+scatter(distance_record, BER_distance);
+grid on;
+xlabel('Transmission Distance (m)');
+ylabel('Total BER');
+title('Total BER vs Transmission Distance');
 
 
 function [tx_usrp, rx_usrp] = USRP_init(fc, tx_gain, rx_gain, rx_length, OFDM_sr)
