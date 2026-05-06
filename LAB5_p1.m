@@ -311,7 +311,374 @@ ber = bit_errors / numel(tx_bits);
 fprintf("BER = %3f\n", ber);
 
 %(10)
+%(10)
+%% =========================================================================
+% (10) Change the modulation to 16-QAM and repeat the experiment
+% =========================================================================
+% 這題要把 modulation 改成 16-QAM，重新傳送與接收一個 frame。
+% 然後重複：
+%   1. frame synchronization
+%   2. CFO estimation
+%   3. CFO correction
+%   4. channel estimation
+%   5. equalization
+%   6. pilot-assisted residual phase correction
+%   7. plot constellation
+%
+% 注意：
+%   這裡沿用前面 Q3~Q9 的架構，只是 qam_num 改成 16。
 
+qam_num_16 = 16;
+
+%% -------------------------------------------------------------------------
+% Generate 16-QAM OFDM frame
+%% -------------------------------------------------------------------------
+[ofdm_data_16, tx_bits_16, tx_data_syms_16, pilot_syms_16] = ...
+    gen_ofdm_data(num_ofdm_symbols, qam_num_16);
+
+% Normalize power of STS, LTS, and OFDM data
+sts_16 = sts / rms(sts);
+lts_16 = lts / rms(lts);
+ofdm_data_16 = ofdm_data_16 / rms(ofdm_data_16);
+
+% Construct TX frame
+tx_frame_16 = [
+    zeros(pad_len, 1);
+    sts_16;
+    lts_16;
+    ofdm_data_16;
+    zeros(pad_len, 1)
+];
+
+% Normalize TX frame peak power
+tx_frame_16 = tx_frame_16 / max(abs(tx_frame_16));
+
+% Repeat frame for easier complete capture
+data_16 = repmat(tx_frame_16, N_repeat, 1);
+
+% RX capture length
+rx_length_16 = (N_repeat + 2) * length(tx_frame_16);
+
+fprintf("\n================ Q10: 16-QAM Transmission ================\n");
+fprintf("16-QAM frame length = %d samples\n", length(tx_frame_16));
+fprintf("16-QAM rx length    = %d samples\n", rx_length_16);
+
+%% -------------------------------------------------------------------------
+% Re-initialize USRP for 16-QAM experiment
+%% -------------------------------------------------------------------------
+[radio_Tx, radio_Rx] = USRP_init(fc, tx_gain, rx_gain, rx_length_16, OFDM_sr);
+
+%% -------------------------------------------------------------------------
+% Multi-tries transmission and frame detection
+%% -------------------------------------------------------------------------
+match_filter_16 = conj(flipud(sts_16));
+
+buffer_16 = zeros(rx_length_16, 1);
+success_16 = 0;
+retry_count_16 = 0;
+
+maxattempts_16 = 50;
+maxretries_16 = 10;
+
+% Threshold can be tuned if frame detection fails
+threshold_16 = 0.003 * length(sts_16) * mean(abs(sts_16).^2);
+
+while ~success_16 && retry_count_16 < maxretries_16
+
+    retry_count_16 = retry_count_16 + 1;
+
+    for attempt = 1:maxattempts_16
+
+        fprintf("16-QAM attempt %d / %d, retry %d / %d\n", ...
+            attempt, maxattempts_16, retry_count_16, maxretries_16);
+
+        % Transmit repeated 16-QAM frame
+        tunderrun = radio_Tx(data_16);
+
+        if tunderrun
+            fprintf("TX underrun happens.\n");
+        end
+
+        % Receive signal
+        [received_signal_16, ~, toverflow] = step(radio_Rx);
+
+        if toverflow
+            fprintf("RX overflow happens. Try next attempt.\n");
+            continue;
+        end
+
+        % STS matched filter for synchronization
+        corr_16 = abs(conv(received_signal_16, match_filter_16));
+        maxval_16 = max(corr_16);
+
+        fprintf("max corr = %.6f, rx max = %.4f, rx rms = %.4f\n", ...
+            maxval_16, max(abs(received_signal_16)), rms(received_signal_16));
+
+        if maxval_16 >= threshold_16
+
+            buffer_16(:, 1) = received_signal_16;
+
+            % Find STS position
+            [~, peak_idx_16] = max(corr_16);
+
+            % STS length = 160 samples
+            sts_start_16 = peak_idx_16 - length(sts_16) + 1;
+
+            % TX frame has pad_len zeros before STS
+            frame_start_16 = sts_start_16 - pad_len;
+            frame_end_16 = frame_start_16 + length(tx_frame_16) - 1;
+
+            % Check whether a complete frame is captured
+            if frame_start_16 < 1 || frame_end_16 > length(received_signal_16)
+                fprintf("Detected frame is incomplete. Try next attempt.\n");
+                continue;
+            end
+
+            success_16 = 1;
+            break;
+        end
+    end
+
+    if success_16
+        fprintf("16-QAM frame detected successfully.\n");
+    else
+        fprintf("Too many failed attempts. Restarting USRP...\n");
+
+        release(radio_Tx);
+        release(radio_Rx);
+
+        [radio_Tx, radio_Rx] = USRP_init(fc, tx_gain, rx_gain, rx_length_16, OFDM_sr);
+    end
+end
+
+release(radio_Tx);
+release(radio_Rx);
+
+if ~success_16
+    error("Q10 failed: Cannot detect complete 16-QAM frame.");
+end
+
+%% -------------------------------------------------------------------------
+% Extract the received 16-QAM frame
+%% -------------------------------------------------------------------------
+rx_frame_16 = buffer_16(frame_start_16:frame_end_16);
+
+fprintf("16-QAM frame_start = %d\n", frame_start_16);
+fprintf("16-QAM frame_end   = %d\n", frame_end_16);
+
+% Plot received 16-QAM time-domain frame
+plot_td_signal(rx_frame_16, fs, ...
+    'Q10: Received 16-QAM OFDM Frame', ...
+    'Real');
+
+%% -------------------------------------------------------------------------
+% CFO estimation using STS
+%% -------------------------------------------------------------------------
+fs_CFO = OFDM_sr;
+D_sts = 16;
+
+sts_start_in_frame = pad_len + 1;
+
+rx_sts_16 = rx_frame_16( ...
+    sts_start_in_frame : sts_start_in_frame + length(sts_16) - 1);
+
+P_sts_16 = sum(conj(rx_sts_16(1:end-D_sts)) .* rx_sts_16(1+D_sts:end));
+
+cfo_est_16 = angle(P_sts_16) * fs_CFO / (2*pi*D_sts);
+
+fprintf("Estimated CFO from STS for 16-QAM = %.2f Hz\n", cfo_est_16);
+
+%% -------------------------------------------------------------------------
+% CFO correction
+%% -------------------------------------------------------------------------
+n_16 = (0:length(rx_frame_16)-1).';
+
+rx_frame_cfo_16 = rx_frame_16 .* exp(-1j * 2*pi * cfo_est_16 * n_16 / fs_CFO);
+
+%% -------------------------------------------------------------------------
+% Channel estimation using LTS after CFO correction
+%% -------------------------------------------------------------------------
+% Known LTS in frequency domain
+lts_f_known_16 = fftshift(fft(lts_16(33:96)));
+
+% First LTS body starts after:
+%   pad_len zeros + STS + 32-sample LTS CP
+first_lts_start_16 = pad_len + length(sts_16) + 33;
+
+rx_lts_1_cfo_16 = extractLTS(rx_frame_cfo_16, first_lts_start_16, 1, FFT_size);
+rx_lts_2_cfo_16 = extractLTS(rx_frame_cfo_16, first_lts_start_16, 2, FFT_size);
+
+H1_cfo_16 = estimateChannelFromLTS(rx_lts_1_cfo_16, lts_f_known_16);
+H2_cfo_16 = estimateChannelFromLTS(rx_lts_2_cfo_16, lts_f_known_16);
+
+% Average two LTS channel estimates
+H_cfo_16 = (H1_cfo_16 + H2_cfo_16) / 2;
+
+%% -------------------------------------------------------------------------
+% Extract OFDM symbols after CFO correction
+%% -------------------------------------------------------------------------
+data_start_16 = pad_len + length(sts_16) + length(lts_16) + 1;
+
+rx_symbols_cfo_16 = extractOFDMSymbols( ...
+    rx_frame_cfo_16, ...
+    data_start_16, ...
+    FFT_size, ...
+    cp_size, ...
+    num_ofdm_symbols);
+
+%% -------------------------------------------------------------------------
+% Equalization without pilot-assisted correction
+%% -------------------------------------------------------------------------
+rx_data_cfo_16 = zeros(length(data_sc), num_ofdm_symbols);
+
+for k = 1:num_ofdm_symbols
+
+    % Remove CP + FFT + fftshift
+    Y_16 = ofdmDemodSymbol(rx_symbols_cfo_16(:, k), FFT_size, cp_size);
+
+    % Equalization
+    X_cfo_16 = equalizeSymbol(Y_16, H_cfo_16);
+
+    % Take only data subcarriers
+    rx_data_syms_bn_16 = X_cfo_16(data_idx);
+
+    % Normalize constellation power for plotting and demodulation
+    rx_data_syms_cfo_16 = rx_data_syms_bn_16 / ...
+        sqrt(mean(abs(rx_data_syms_bn_16).^2));
+
+    rx_data_cfo_16(:, k) = rx_data_syms_cfo_16(:);
+end
+
+plotConstellation(rx_data_cfo_16, ...
+    'Q10: 16-QAM Constellation after CFO Correction and Equalization');
+
+%% -------------------------------------------------------------------------
+% Pilot-assisted residual phase correction
+%% -------------------------------------------------------------------------
+pilot_idx = sc2idx(pilot_sc);
+
+rx_data_pilot_16 = zeros(length(data_sc), num_ofdm_symbols);
+tracked_phase_16 = zeros(1, num_ofdm_symbols);
+
+for k = 1:num_ofdm_symbols
+
+    % Remove CP + FFT + fftshift from CFO-corrected frame
+    Y_16 = ofdmDemodSymbol(rx_symbols_cfo_16(:, k), FFT_size, cp_size);
+
+    % Equalization using channel estimated from LTS
+    X_hat_16 = equalizeSymbol(Y_16, H_cfo_16);
+
+    % Received pilot tones after equalization
+    rx_pilot_16 = X_hat_16(pilot_idx);
+
+    % Known transmitted pilot tones
+    tx_pilot_16 = pilot_syms_16(:, k);
+
+    % Estimate common phase error using four pilots
+    theta_16 = angle(sum(rx_pilot_16 .* conj(tx_pilot_16)));
+
+    tracked_phase_16(k) = theta_16;
+
+    % Correct all subcarriers in this OFDM symbol
+    X_hat_pilot_16 = X_hat_16 * exp(-1j * theta_16);
+
+    % Take only data tones
+    rx_data_pilot_bn_16 = X_hat_pilot_16(data_idx);
+
+    % Normalize power
+    rx_data_pilot_k_16 = rx_data_pilot_bn_16 / ...
+        sqrt(mean(abs(rx_data_pilot_bn_16).^2));
+
+    rx_data_pilot_16(:, k) = rx_data_pilot_k_16(:);
+end
+
+plotConstellation(rx_data_pilot_16, ...
+    'Q10: 16-QAM Pilot-Assisted Received Constellation', ...
+    tx_data_syms_16(:));
+
+
+
+fprintf("Q10 finished: 16-QAM CFO correction, equalization, and pilot-assisted constellation plotted.\n");
+
+%(11)
+%% =========================================================================
+% (11) Calculate BER for 16-QAM and compare with 4-QAM
+%% =========================================================================
+% Q11 要做的事情：
+%   1. 將 Q10 pilot-assisted correction 後的 16-QAM symbols 解調成 bits
+%   2. 跟原本傳送的 tx_bits_16 比較
+%   3. 算出 16-QAM BER
+%   4. 跟 Q9 的 4-QAM BER 比較
+
+%% -------------------------------------------------------------------------
+% Save 4-QAM BER from Q9
+%% -------------------------------------------------------------------------
+% 前面 Q9 算完後，變數 ber 代表 4-QAM BER。
+% 為了避免後面被覆蓋，先存成 ber_4qam。
+if exist('ber_4qam', 'var') == 0
+    ber_4qam = ber;
+end
+
+%% -------------------------------------------------------------------------
+% Demodulate 16-QAM received symbols
+%% -------------------------------------------------------------------------
+bits_per_symbol_16 = log2(qam_num_16);
+
+% rx_data_pilot_16 size:
+%   length(data_sc) x num_ofdm_symbols
+%
+% 對每個 OFDM symbol 分別做 16-QAM demodulation。
+rx_bits_16 = zeros(bits_per_symbol_16 * length(data_sc), num_ofdm_symbols);
+
+for k = 1:num_ofdm_symbols
+
+    % 取出第 k 個 OFDM symbol 的 data tones
+    rx_data_pilot_16_k = rx_data_pilot_16(:, k);
+
+    % 16-QAM demodulation
+    rx_bits_16_k = qamdemod(rx_data_pilot_16_k, qam_num_16, ...
+        'OutputType', 'bit', ...
+        'UnitAveragePower', true);
+
+    % 存起來
+    rx_bits_16(:, k) = rx_bits_16_k(:);
+end
+
+%% -------------------------------------------------------------------------
+% Calculate 16-QAM BER
+%% -------------------------------------------------------------------------
+% tx_bits_16 是 Q10 產生的 transmitted bits
+bit_errors_16 = sum(rx_bits_16(:) ~= tx_bits_16(:));
+
+ber_16qam = bit_errors_16 / numel(tx_bits_16);
+
+%% -------------------------------------------------------------------------
+% Print results
+%% -------------------------------------------------------------------------
+fprintf("\n================ Q11 BER Comparison ================\n");
+fprintf("4-QAM  BER from Q9  = %.6f\n", ber_4qam);
+fprintf("16-QAM BER from Q11 = %.6f\n", ber_16qam);
+fprintf("16-QAM bit errors   = %d / %d bits\n", bit_errors_16, numel(tx_bits_16));
+
+if ber_16qam > ber_4qam
+    fprintf("Observation: 16-QAM BER is higher than 4-QAM BER.\n");
+    fprintf("Reason: 16-QAM constellation points are closer, so it is more sensitive to noise, residual CFO, and channel estimation error.\n");
+elseif ber_16qam < ber_4qam
+    fprintf("Observation: 16-QAM BER is lower than 4-QAM BER in this trial.\n");
+    fprintf("This may happen due to channel variation, frame selection, or random transmission conditions.\n");
+else
+    fprintf("Observation: 16-QAM BER is the same as 4-QAM BER in this trial.\n");
+end
+
+%% -------------------------------------------------------------------------
+% Optional: bar plot comparing 4-QAM and 16-QAM BER
+%% -------------------------------------------------------------------------
+figure;
+bar([ber_4qam, ber_16qam]);
+grid on;
+set(gca, 'XTickLabel', {'4-QAM', '16-QAM'});
+ylabel('BER');
+title('Q11: BER Comparison between 4-QAM and 16-QAM');
 
 
 function [tx_usrp, rx_usrp] = USRP_init(fc, tx_gain, rx_gain, rx_length, OFDM_sr)
