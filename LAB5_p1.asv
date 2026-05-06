@@ -286,9 +286,9 @@ for k = 1:num_ofdm_symbols
     % Correct all subcarriers in this OFDM symbol
     X_hat_pilot = X_hat * exp(-1j * theta);
     rx_data_pilot_bn = X_hat_pilot(data_idx);
-    rx_data_pilot_k = rx_data_pilot_bn / sqrt(mean(abs(rx_data_pilot_bn).^2));
+    rx_data_syms_cfo = rx_data_syms_bn_cfo / sqrt(mean(abs(rx_data_syms_bn_cfo).^2));
     % Store only data tones
-    rx_data_pilot(:, k) = rx_data_pilot_k(:);
+    rx_data_pilot(:, k) = ;
 end
 
 % Normalize once for plotting
@@ -299,18 +299,7 @@ plotConstellation(rx_data_pilot, 'pilot-assisted received constellation', tx_dat
 %(9)
 rx_bits = zeros(2*length(data_sc), num_ofdm_symbols);
 
-for k = 1:num_ofdm_symbols
-    rx_data_pilot_k = rx_data_pilot(:, k);
-    rx_bits_k = qamdemod(rx_data_pilot_k, 4, 'OutputType', 'bit','UnitAveragePower', true);        
-    rx_bits(:, k) = rx_bits_k(:);
-end
 
-% calculate BER
-bit_errors = sum(rx_bits(:) ~= tx_bits(:));
-ber = bit_errors / numel(tx_bits);
-fprintf("BER = %3f\n", ber);
-
-%(10)
 
 
 
