@@ -755,7 +755,581 @@ fprintf('\nPart 2 Q5 finished.\n');
 fprintf('MRC constellation is plotted and compared with single-antenna constellations.\n');
 
 
+%% =========================================================================
+% Lab 5 Part 2 Q6
+% MRT Training Signal
+%
+% Q6:
+%   TX = USRP-2901 / B210, dual TX
+%   RX = USRP-2920 / N200, single RX
+%
+% 目的：
+%   1. 產生 TX1 / TX2 分時 training signal
+%   2. B210 用兩根 TX antennas 傳送
+%   3. 2920 用一根 RX antenna 接收
+%   4. 畫 received training signal，並標出 TX1 / TX2 區段
+%% =========================================================================
 
+fprintf('\n================ Part 2 Q6 ================\n');
+fprintf('Start MRT training signal transmission.\n');
+
+%% -------------------------------------------------------------------------
+% 0. Release MRC objects again before switching to MRT
+%% -------------------------------------------------------------------------
+try
+    release(radio_Tx);
+catch
+end
+
+try
+    release(radio_Rx);
+catch
+end
+
+try
+    release(radio_Tx_mrt);
+catch
+end
+
+try
+    release(radio_Rx_mrt);
+catch
+end
+
+pause(1);
+
+%% -------------------------------------------------------------------------
+% 1. Generate MRT training signal
+%% -------------------------------------------------------------------------
+gap_len = 300;
+
+[tx1_training, tx2_training, training_info] = gen_MRT_training_signal( ...
+    sts, lts, pad_len, gap_len);
+
+if length(tx1_training) ~= length(tx2_training)
+    error('tx1_training and tx2_training must have the same length.');
+end
+
+% Normalize training waveform
+peak_train = max([abs(tx1_training); abs(tx2_training)]);
+tx1_training = tx1_training / peak_train;
+tx2_training = tx2_training / peak_train;
+
+training_frame_len = length(tx1_training);
+
+fprintf('MRT training frame length = %d samples\n', training_frame_len);
+
+%% -------------------------------------------------------------------------
+% 2. Plot designed training signal
+%% -------------------------------------------------------------------------
+plot_td_signal(tx1_training, fs, ...
+    'Part 2 Q6: Designed TX Antenna 1 Training Signal', ...
+    'Abs', ...
+    {'TX1: STS + LTS'}, ...
+    [training_info.tx1_start, training_info.tx1_end]);
+
+plot_td_signal(tx2_training, fs, ...
+    'Part 2 Q6: Designed TX Antenna 2 Training Signal', ...
+    'Abs', ...
+    {'TX2: LTS'}, ...
+    [training_info.tx2_lts_start, training_info.tx2_lts_end]);
+
+%% -------------------------------------------------------------------------
+% 3. Repeat training frame
+%% -------------------------------------------------------------------------
+N_repeat_training = 20;
+
+tx1_training_waveform = repmat(tx1_training, N_repeat_training, 1);
+tx2_training_waveform = repmat(tx2_training, N_repeat_training, 1);
+
+% ============================================================
+% 正式 Q6：TX1 先送 STS+LTS，TX2 後面送 LTS
+% ============================================================
+tx_training_waveform = [tx1_training_waveform, tx2_training_waveform];
+
+% 如果你要 debug TX1-only，用這行：
+% tx_training_waveform = [tx1_training_waveform, zeros(size(tx1_training_waveform))];
+
+% 如果你要 debug TX2-only，注意要用 tx1_training_waveform 放到第二欄，
+% 因為 tx2_training_waveform 沒有 STS，不好同步。
+% tx_training_waveform = [zeros(size(tx1_training_waveform)), tx1_training_waveform];
+
+rx_length_training = (N_repeat_training + 2) * training_frame_len;
+
+fprintf('MRT training TX waveform length = %d samples\n', size(tx_training_waveform, 1));
+fprintf('MRT training RX length          = %d samples\n', rx_length_training);
+
+%% -------------------------------------------------------------------------
+% 4. Initialize MRT USRP
+%% -------------------------------------------------------------------------
+[radio_Tx_mrt, radio_Rx_mrt] = USRP_init_MRT( ...
+    fc, tx_gain, rx_gain, rx_length_training, OFDM_sr, ...
+    serial_2901, ip_2920, ...
+    master_clock_rate_2901, master_clock_rate_2920);
+
+%% -------------------------------------------------------------------------
+% 5. Transmit and receive training signal
+%% -------------------------------------------------------------------------
+match_filter = conj(flipud(sts));
+
+% Q6 的方向跟 Q1 不同，所以 threshold 不一定能沿用 Q1
+threshold_training = 0.005;
+
+maxattempts_training = 80;
+maxretries_training = 5;
+
+success_training = 0;
+retry_count_training = 0;
+
+while ~success_training && retry_count_training < maxretries_training
+
+    retry_count_training = retry_count_training + 1;
+
+    for attempt = 1:maxattempts_training
+
+        fprintf('\nQ6 training attempt %d / %d, retry %d / %d\n', ...
+            attempt, maxattempts_training, retry_count_training, maxretries_training);
+
+        %% TX: B210 / 2901 dual-channel transmit
+        tx_underrun = radio_Tx_mrt(tx_training_waveform);
+
+        if tx_underrun
+            fprintf('Q6 TX underrun occurred.\n');
+        end
+
+        pause(0.02);
+
+        %% RX: N200 / 2920 single-channel receive
+        [rx_training_signal, len_training, rx_overflow] = step(radio_Rx_mrt);
+
+        if rx_overflow
+            fprintf('Q6 RX overflow occurred. Try next attempt.\n');
+            continue;
+        end
+
+        if len_training == 0
+            fprintf('Q6 no samples received. Try next attempt.\n');
+            continue;
+        end
+
+        rx_training_signal = rx_training_signal(1:len_training);
+        rx_training_signal = rx_training_signal - mean(rx_training_signal);
+
+        %% STS correlation
+        corr_training = abs(conv(rx_training_signal, match_filter));
+        max_corr_training = max(corr_training);
+
+        fprintf('Q6 rx max abs = %.6f, rms = %.6f\n', ...
+            max(abs(rx_training_signal)), rms(rx_training_signal));
+        fprintf('Q6 max corr = %.6f\n', max_corr_training);
+
+        figure(901);
+        plot(abs(rx_training_signal));
+        grid on;
+        title('Q6 Debug: RX Training Signal Magnitude');
+
+        figure(902);
+        plot(corr_training);
+        grid on;
+        title('Q6 Debug: STS Correlation');
+        xlabel('Sample Index');
+        ylabel('Correlation Magnitude');
+
+        %% Find complete training frame
+        if max_corr_training >= threshold_training
+
+            cand_idx = find(corr_training >= threshold_training);
+
+            selected = [];
+            last_idx = -inf;
+
+            for ci = 1:length(cand_idx)
+                if cand_idx(ci) - last_idx > length(sts)
+                    selected(end+1) = cand_idx(ci); %#ok<SAGROW>
+                    last_idx = cand_idx(ci);
+                end
+            end
+
+            found_complete = false;
+
+            for ci = 1:length(selected)
+
+                peak_idx_training = selected(ci);
+
+                sts_start_training = peak_idx_training - length(sts) + 1;
+                frame_start_training = sts_start_training - pad_len;
+                frame_end_training = frame_start_training + training_frame_len - 1;
+
+                if frame_start_training >= 1 && frame_end_training <= length(rx_training_signal)
+                    found_complete = true;
+                    break;
+                end
+            end
+
+            if ~found_complete
+                fprintf('Q6 detected peak, but no complete training frame found.\n');
+                continue;
+            end
+
+            fprintf('Q6 detected sts_start   = %d\n', sts_start_training);
+            fprintf('Q6 detected frame_start = %d\n', frame_start_training);
+            fprintf('Q6 detected frame_end   = %d\n', frame_end_training);
+
+            success_training = 1;
+            break;
+        end
+    end
+
+    if success_training
+        fprintf('\nQ6 success: complete MRT training frame detected.\n');
+    else
+        fprintf('\nQ6 too many failed attempts. Restarting MRT USRP objects...\n');
+
+        release(radio_Tx_mrt);
+        release(radio_Rx_mrt);
+        pause(1);
+
+        [radio_Tx_mrt, radio_Rx_mrt] = USRP_init_MRT( ...
+            fc, tx_gain, rx_gain, rx_length_training, OFDM_sr, ...
+            serial_2901, ip_2920, ...
+            master_clock_rate_2901, master_clock_rate_2920);
+    end
+end
+
+release(radio_Tx_mrt);
+release(radio_Rx_mrt);
+
+if ~success_training
+    error('Q6 failed: cannot detect complete MRT training frame.');
+end
+
+%% -------------------------------------------------------------------------
+% 6. Extract received MRT training frame
+%% -------------------------------------------------------------------------
+rx_training_frame = rx_training_signal(frame_start_training:frame_end_training);
+rx_training_frame = rx_training_frame - mean(rx_training_frame);
+
+fprintf('\nExtracted MRT training frame length = %d samples\n', length(rx_training_frame));
+
+%% -------------------------------------------------------------------------
+% 7. Q6 required plot
+%% -------------------------------------------------------------------------
+region_names_training = {'TX Antenna 1: STS + LTS', 'TX Antenna 2: LTS'};
+
+region_ranges_training = [
+    training_info.tx1_start, training_info.tx1_end;
+    training_info.tx2_lts_start, training_info.tx2_lts_end
+];
+
+plot_td_signal(rx_training_frame, fs, ...
+    'Part 2 Q6: Received MRT Training Signal at RX Antenna', ...
+    'Abs', ...
+    region_names_training, ...
+    region_ranges_training);
+
+fprintf('\nPart 2 Q6 finished.\n');
+
+% 先只確認 Q6 的話，暫時打開 return
+% return;
+
+%% =========================================================================
+% Lab 5 Part 2 Q7
+% Estimate channels from TX antenna 1 and TX antenna 2 to RX antenna
+%
+% Q7 目的：
+%   Q6 已經讓：
+%       TX1 先送 STS + LTS
+%       TX2 後面送 LTS
+%
+%   Q7 要從 rx_training_frame 裡估出：
+%       H_tx1[k] = TX antenna 1 -> RX antenna 的 channel
+%       H_tx2[k] = TX antenna 2 -> RX antenna 的 channel
+%
+% 直覺：
+%   TX1 的 LTS 區段可以估 H_tx1
+%   TX2 的 LTS 區段可以估 H_tx2
+%
+% 注意：
+%   如果 Q6 圖裡 TX2 那段幾乎沒訊號，
+%   那 Q7 的 H_tx2 也會很小，這不是 Q7 code 錯，
+%   而是 TX2 實體鏈路沒有正常收到。
+%% =========================================================================
+
+fprintf('\n================ Part 2 Q7 ================\n');
+fprintf('Estimating channels H_tx1 and H_tx2 from MRT training frame...\n');
+
+%% -------------------------------------------------------------------------
+% 1. Estimate two TX channels from Q6 received training frame
+%% -------------------------------------------------------------------------
+% estimateTwoTxChannelsFromTraining() 會做：
+%   1. 從 TX1 的兩個 LTS 估 CFO
+%   2. 對整個 training frame 做 CFO correction
+%   3. 用 TX1 的 LTS 估 H_tx1
+%   4. 用 TX2 的 LTS 估 H_tx2
+
+[H_tx1, H_tx2, cfo_hat_training, rx_training_cfo] = estimateTwoTxChannelsFromTraining( ...
+    rx_training_frame, ...
+    sts, ...
+    lts, ...
+    pad_len, ...
+    gap_len, ...
+    FFT_size, ...
+    fs, ...
+    lts_f_known);
+
+fprintf('Q7 estimated CFO from MRT training = %.2f Hz\n', cfo_hat_training);
+
+%% -------------------------------------------------------------------------
+% 2. Prepare subcarrier axis
+%% -------------------------------------------------------------------------
+subcarrier_axis = (-FFT_size/2):(FFT_size/2-1);
+
+% lts_f_known 為 0 的位置是 null / unused subcarriers
+% 不要拿來畫 channel，否則會誤導
+valid_lts_idx = abs(lts_f_known) > 1e-12;
+
+H_tx1_mag = abs(H_tx1);
+H_tx2_mag = abs(H_tx2);
+
+H_tx1_phase = angle(H_tx1);
+H_tx2_phase = angle(H_tx2);
+
+% 把 unused subcarriers 設成 NaN，畫圖時會自動跳過
+H_tx1_mag(~valid_lts_idx) = NaN;
+H_tx2_mag(~valid_lts_idx) = NaN;
+
+H_tx1_phase(~valid_lts_idx) = NaN;
+H_tx2_phase(~valid_lts_idx) = NaN;
+
+%% -------------------------------------------------------------------------
+% 3. Plot channel magnitude and phase
+%% -------------------------------------------------------------------------
+figure;
+
+subplot(2,1,1);
+plot(subcarrier_axis, H_tx1_mag, '-o', 'LineWidth', 1.2);
+hold on;
+plot(subcarrier_axis, H_tx2_mag, '-s', 'LineWidth', 1.2);
+grid on;
+xlabel('Subcarrier Index');
+ylabel('|H[k]|');
+title('Part 2 Q7: Estimated Channel Magnitude of TX Antenna 1 and TX Antenna 2');
+legend('TX Antenna 1 to RX', 'TX Antenna 2 to RX', 'Location', 'best');
+
+subplot(2,1,2);
+plot(subcarrier_axis, unwrap(H_tx1_phase), '-o', 'LineWidth', 1.2);
+hold on;
+plot(subcarrier_axis, unwrap(H_tx2_phase), '-s', 'LineWidth', 1.2);
+grid on;
+xlabel('Subcarrier Index');
+ylabel('Phase of H[k] (rad)');
+title('Part 2 Q7: Estimated Channel Phase of TX Antenna 1 and TX Antenna 2');
+legend('TX Antenna 1 to RX', 'TX Antenna 2 to RX', 'Location', 'best');
+
+%% -------------------------------------------------------------------------
+% 4. Print channel strength summary - safer version
+%% -------------------------------------------------------------------------
+
+% 先強制都變成 column vector，避免 row/column 或 logical indexing 怪問題
+H_tx1_vec = H_tx1(:);
+H_tx2_vec = H_tx2(:);
+valid_vec = valid_lts_idx(:);
+
+% 只取 active LTS subcarriers
+H_tx1_active = H_tx1_vec(valid_vec);
+H_tx2_active = H_tx2_vec(valid_vec);
+
+% 清掉 NaN / Inf
+H_tx1_active = H_tx1_active(isfinite(H_tx1_active));
+H_tx2_active = H_tx2_active(isfinite(H_tx2_active));
+
+avg_H_tx1 = mean(abs(H_tx1_active).^2);
+avg_H_tx2 = mean(abs(H_tx2_active).^2);
+
+rms_H_tx1 = rms(abs(H_tx1_active));
+rms_H_tx2 = rms(abs(H_tx2_active));
+
+fprintf('\nQ7 channel strength summary:\n');
+fprintf('Average |H_tx1|^2 = %.6e\n', avg_H_tx1);
+fprintf('Average |H_tx2|^2 = %.6e\n', avg_H_tx2);
+fprintf('RMS |H_tx1|        = %.6f\n', rms_H_tx1);
+fprintf('RMS |H_tx2|        = %.6f\n', rms_H_tx2);
+
+fprintf('TX2/TX1 channel power ratio = %.2f dB\n', ...
+    10*log10((avg_H_tx2 + 1e-12) / (avg_H_tx1 + 1e-12)));
+
+if avg_H_tx2 < 0.1 * avg_H_tx1
+    warning('H_tx2 is much weaker than H_tx1. MRT will mainly use TX antenna 1.');
+end
+
+%% =========================================================================
+% Lab 5 Part 2 Q8
+% Generate MRT / Conjugate Beamforming Data Frame
+%
+% Q8 目的：
+%   1. 使用 Q7 估出來的 H_tx1 / H_tx2
+%   2. 對每個 subcarrier 設計 MRT beamforming weight
+%   3. 產生兩根 TX antennas 要送的 time-domain data frame
+%
+% MRT beamforming weight:
+%   h[k] = [H_tx1[k]; H_tx2[k]]
+%   w[k] = conj(h[k]) / ||h[k]||
+%
+% 直覺：
+%   channel 比較強的 TX antenna 會被分到比較大的權重
+%   phase 會用 channel conjugate 補償，讓兩根 TX 到 RX 時同相相加
+%% =========================================================================
+
+fprintf('\n================ Part 2 Q8 ================\n');
+fprintf('Generating MRT beamforming data frames...\n');
+
+%% -------------------------------------------------------------------------
+% 1. Generate MRT data frame for two TX antennas
+%% -------------------------------------------------------------------------
+% gen_MRT_data_frame() 會做：
+%   1. tx_bits -> 16-QAM symbols
+%   2. 對每個 subcarrier 算 MRT weight
+%   3. 分別產生 TX1 / TX2 的 frequency-domain OFDM symbol
+%   4. IFFT + CP
+%   5. 加上 STS / LTS preamble
+%   6. 輸出兩根 TX antennas 的 time-domain frame
+
+[tx1_mrt_frame, tx2_mrt_frame, mrt_weights] = gen_MRT_data_frame( ...
+    tx_bits, ...
+    qam_num, ...
+    FFT_size, ...
+    cp_size, ...
+    data_sc, ...
+    pilot_sc, ...
+    pilot_syms, ...
+    sts, ...
+    lts, ...
+    pad_len, ...
+    H_tx1, ...
+    H_tx2);
+
+%% -------------------------------------------------------------------------
+% 2. Basic sanity check
+%% -------------------------------------------------------------------------
+if length(tx1_mrt_frame) ~= length(tx2_mrt_frame)
+    error('tx1_mrt_frame and tx2_mrt_frame must have the same length.');
+end
+
+mrt_frame_len = length(tx1_mrt_frame);
+
+fprintf('MRT data frame length = %d samples\n', mrt_frame_len);
+fprintf('TX1 MRT frame max = %.4f, rms = %.4f\n', ...
+    max(abs(tx1_mrt_frame)), rms(tx1_mrt_frame));
+fprintf('TX2 MRT frame max = %.4f, rms = %.4f\n', ...
+    max(abs(tx2_mrt_frame)), rms(tx2_mrt_frame));
+
+%% -------------------------------------------------------------------------
+% 3. Prepare subcarrier axis
+%% -------------------------------------------------------------------------
+subcarrier_axis = (-FFT_size/2):(FFT_size/2-1);
+
+% lts_f_known 為 0 的 subcarrier 是 null / unused subcarriers
+valid_lts_idx = abs(lts_f_known) > 1e-12;
+
+%% -------------------------------------------------------------------------
+% 4. Extract MRT weights
+%% -------------------------------------------------------------------------
+% mrt_weights size = 2 x FFT_size
+% row 1: TX antenna 1 的 weight
+% row 2: TX antenna 2 的 weight
+
+W1 = mrt_weights(1, :).';
+W2 = mrt_weights(2, :).';
+
+W1_mag = abs(W1);
+W2_mag = abs(W2);
+
+W1_phase = angle(W1);
+W2_phase = angle(W2);
+
+% 不畫 unused subcarriers
+W1_mag(~valid_lts_idx) = NaN;
+W2_mag(~valid_lts_idx) = NaN;
+
+W1_phase(~valid_lts_idx) = NaN;
+W2_phase(~valid_lts_idx) = NaN;
+
+%% -------------------------------------------------------------------------
+% 5. Plot MRT beamforming weight magnitude and phase
+%% -------------------------------------------------------------------------
+figure;
+
+subplot(2,1,1);
+plot(subcarrier_axis, W1_mag, '-o', 'LineWidth', 1.2);
+hold on;
+plot(subcarrier_axis, W2_mag, '-s', 'LineWidth', 1.2);
+grid on;
+xlabel('Subcarrier Index');
+ylabel('|w[k]|');
+title('Part 2 Q8: MRT Beamforming Weight Magnitude');
+legend('Weight for TX Antenna 1', 'Weight for TX Antenna 2', 'Location', 'best');
+
+subplot(2,1,2);
+plot(subcarrier_axis, unwrap(W1_phase), '-o', 'LineWidth', 1.2);
+hold on;
+plot(subcarrier_axis, unwrap(W2_phase), '-s', 'LineWidth', 1.2);
+grid on;
+xlabel('Subcarrier Index');
+ylabel('Phase of w[k] (rad)');
+title('Part 2 Q8: MRT Beamforming Weight Phase');
+legend('Weight for TX Antenna 1', 'Weight for TX Antenna 2', 'Location', 'best');
+
+%% -------------------------------------------------------------------------
+% 6. Plot generated MRT time-domain frames
+%% -------------------------------------------------------------------------
+% Q8 也可以畫出兩根 TX antennas 實際要送的 waveform。
+% 這可以幫你確認兩個 frame 長度一致，而且 preamble / data 區段正常。
+
+region_names_mrt = {'STS', 'LTS', '100 OFDM Symbols'};
+
+region_ranges_mrt = [
+    pad_len + 1, ...
+    pad_len + length(sts);
+
+    pad_len + length(sts) + 1, ...
+    pad_len + length(sts) + length(lts);
+
+    pad_len + length(sts) + length(lts) + 1, ...
+    pad_len + length(sts) + length(lts) + num_ofdm_symbols*(FFT_size + cp_size)
+];
+
+plot_td_signal(tx1_mrt_frame, fs, ...
+    'Part 2 Q8: MRT TX Antenna 1 Data Frame', ...
+    'Abs', ...
+    region_names_mrt, ...
+    region_ranges_mrt);
+
+plot_td_signal(tx2_mrt_frame, fs, ...
+    'Part 2 Q8: MRT TX Antenna 2 Data Frame', ...
+    'Abs', ...
+    region_names_mrt, ...
+    region_ranges_mrt);
+
+%% -------------------------------------------------------------------------
+% 7. Weight summary for report
+%% -------------------------------------------------------------------------
+W1_active = W1(valid_lts_idx);
+W2_active = W2(valid_lts_idx);
+
+avg_W1 = mean(abs(W1_active), 'omitnan');
+avg_W2 = mean(abs(W2_active), 'omitnan');
+
+fprintf('\nQ8 MRT weight summary:\n');
+fprintf('Average |w1| = %.4f\n', avg_W1);
+fprintf('Average |w2| = %.4f\n', avg_W2);
+
+if avg_W1 > avg_W2
+    fprintf('TX antenna 1 receives larger MRT weights on average.\n');
+else
+    fprintf('TX antenna 2 receives larger MRT weights on average.\n');
+end
+
+fprintf('\nPart 2 Q8 finished.\n');
 
 
 
@@ -2068,5 +2642,4 @@ function plotConstellation(sym, plot_title, ref_sym)
     axis equal;
     grid on;
 end
-
 
