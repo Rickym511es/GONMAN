@@ -1,8 +1,36 @@
 %(1)
-% % Description TBD
+%% Network Configuration for Controlling Two USRPs
+% Computer side:
+%   IP address: 192.168.10.1
+%   Subnet mask: 255.255.255.0
+% 
+% USRP-2920 (TX):
+%   Platform: N200/N210/USRP2
+%   IP address: 192.168.10.2
+% 
+% USRP-2901 (RX):
+%   Platform: B210
+%   Serial Number: 34D9DC3
+% 
+% Explanation:
+%   The computer's Ethernet interface is configured to the same subnet (192.168.10.x) as the USRP-2920,
+%   so they can communicate directly over the wired Ethernet connection.
+%   The USRP-2901 is connected via USB 3.0 and is identified by its serial number, not by IP.
+%   MATLAB's UHD driver allows controlling both devices simultaneously.
 
 %(2)
-% % Description TBD
+%% Strategy to Capture a Complete Frame
+% To capture a complete frame:
+% 1. The TX frame is repeated 10 times to make it much longer than one frame.
+%    This ensures at least one full frame falls entirely inside the RX buffer.
+% 2. At the receiver, we compute the matched filter output between the received signal and the known Short Training Sequence (STS). 
+%    The STS has good autocorrelation properties.
+% 3. When the matched filter peak exceeds a preset threshold, a frame is detected.
+% 4. The STS start is estimated from the peak position.
+% 5. The frame boundaries are determined by subtracting/adding the known padding, STS, LTS, and OFDM data lengths.
+% 6. We check that both start and end indices lie within the received buffer to guarantee a complete capture.
+% 
+% This approach is robust against random arrival time of the frame inside the long repeated transmission.
 
 %(3)
 % parameters
@@ -45,6 +73,7 @@ OFDM_sr = 1e6;
 info = findsdru();
 disp(info(1))
 disp(info(2))
+plot_td_signal(tx_frame, fs, 'Tx Wi-Fi OFDM Frame', 'Real');
 
 % multi-tries transmission
 % Matched filter for STS detection
@@ -111,7 +140,7 @@ while ~success && retry_count < maxretries
     end
     
     if success
-        fprintf("GON GON\n")
+        fprintf("Good\n")
     else
         fprintf("Attempt TOO MANY TIMES, restarting usrp!\n");
         release(radio_Tx);
@@ -156,7 +185,7 @@ while ~success && retry_count < maxretries
     % Check BER of this frame
     bit_errors = sum(rx_bits(:) ~= tx_bits(:));
     
-    %%% discarding ass frame %%%
+    %%% discarding failed frame %%%
     ber = bit_errors / numel(tx_bits);
     fprintf("BER = %3f\n", ber);
 
@@ -166,7 +195,14 @@ while ~success && retry_count < maxretries
     %    continue;
     % end 
 end
-plot_td_signal(rx_frame, fs, 'Received Wi-Fi OFDM Frame', 'Real');
+frame_len = length(tx_frame);
+region_names = {'STS', 'LTS', 'OFDM Data'};
+region_ranges = [
+    pad_len+1, pad_len+length(sts);                      % STS
+    pad_len+length(sts)+1, pad_len+length(sts)+length(lts); % LTS
+    pad_len+length(sts)+length(lts)+1, pad_len+length(sts)+length(lts)+length(ofdm_data) % Data
+];
+plot_td_signal(rx_frame, fs, 'Received Wi-Fi OFDM Frame', 'Real', region_names, region_ranges);
 
 %(4)
 plotConstellation(rx_data, 'received constellation without CFO');
@@ -185,6 +221,15 @@ P_sts = sum(conj(rx_sts(1:end-D_sts)) .* rx_sts(1+D_sts:end));
 cfo_est = angle(P_sts) * fs_CFO / (2*pi*D_sts);
 
 fprintf("Estimated CFO from STS = %.2f Hz\n", cfo_est);
+%%
+% CFO Estimation Process:
+%   We use the STS for CFO estimation because:
+%   - STS has a periodicity of D = 16 samples
+%   - The phase rotation between two identical STS segments is proportional to the CFO
+%   - CFO = angle(P) * fs / (2*pi*D) where P = sum( conj(rx_sts(1:end-D)) .* rx_sts(1+D:end) )
+% 
+%   LTS could also be used, but STS gives a wider estimation range because of its shorter repetition period (16 vs 64).
+%   Here we only use STS for simplicity.
 
 % % Description TBD
 
