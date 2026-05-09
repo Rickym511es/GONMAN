@@ -1,4 +1,4 @@
-%(1)
+%(1)Describe your network configuration that allows the computer to control two USRPs.
 %% Network Configuration for Controlling Two USRPs
 % Computer side:
 %   IP address: 192.168.10.1
@@ -18,7 +18,7 @@
 %   The USRP-2901 is connected via USB 3.0 and is identified by its serial number, not by IP.
 %   MATLAB's UHD driver allows controlling both devices simultaneously.
 
-%(2)
+%(2)Explain the strategy you employ to ensure complete capture of a whole frame at USRP 2.
 %% Strategy to Capture a Complete Frame
 % To capture a complete frame:
 % 1. The TX frame is repeated 10 times to make it much longer than one frame.
@@ -32,7 +32,7 @@
 % 
 % This approach is robust against random arrival time of the frame inside the long repeated transmission.
 
-%(3)
+%(3)plot the received signal in the time domain at USRP 2.
 % parameters
 FFT_size = 64;
 cp_size = 16;
@@ -204,10 +204,11 @@ region_ranges = [
 ];
 plot_td_signal(rx_frame, fs, 'Received Wi-Fi OFDM Frame', 'Real', region_names, region_ranges);
 
-%(4)
+%(4)plot the received constellation (only the data tones). Do you observe the constellation rotating?
 plotConstellation(rx_data, 'received constellation without CFO');
+fprintf("Yes, received constellation without CFO rotate as whole circle\n");
 
-%(5)
+%(5)What is the estimated CFO? Also, please explain your CFO estimation process.
 fs_CFO = OFDM_sr;
 
 % Use STS repeated structure for CFO estimation
@@ -231,9 +232,9 @@ fprintf("Estimated CFO from STS = %.2f Hz\n", cfo_est);
 %   LTS could also be used, but STS gives a wider estimation range because of its shorter repetition period (16 vs 64).
 %   Here we only use STS for simplicity.
 
-% % Description TBD
+%(6)Apply CFO correction to the received frame and then estimate the channel. Plot the magnitude and the phase of the estimated channel vs subcarrier,
+% with zero subcarrier in the middle. Describe and discuss the figure.
 
-%(6)
 % CFO correction
 n = (0:length(rx_frame)-1).';
 rx_frame_cfo = rx_frame .* exp(-1j*2*pi*cfo_est*n/fs_CFO);
@@ -282,9 +283,20 @@ xlabel('Subcarrier Index');
 ylabel('Phase of H[k] (rad)');
 title('Estimated Channel Phase after CFO Correction');
 
-% % Description TBD
+%{
+Discussion of Estimated Channel:
 
-%(7)
+Magnitude plot:
+  - The channel magnitude varies across subcarriers due to frequency-selective fading.
+  - The edges (subcarriers -26 and +26) have lower magnitude because of the analog filter roll-off.
+  - Nulls at certain subcarriers indicate destructive multipath interference.
+
+Phase plot:
+  - The unwrapped phase is approximately linear, corresponding to a time delay (the channel impulse response delay).
+  - Some nonlinearities may be caused by residual CFO or measurement noise.
+%}
+
+%(7)Perform equalization on the received frame.
 rx_symbols_cfo = extractOFDMSymbols(rx_frame_cfo, data_start, FFT_size, cp_size, num_ofdm_symbols);
 rx_data_cfo = zeros(length(data_sc), num_ofdm_symbols);
 
@@ -302,9 +314,9 @@ for k = 1:num_ofdm_symbols
 end
 plotConstellation(rx_data_cfo, 'received constellation after CFO');
 
-% % Description TBD
+%There is still a little rotation exsist in constellation, but much smaller compared to (4)
 
-%(8)
+%(8)Use the four pilot tones to track the residual CFO and further correct the data tones accordingly
 pilot_idx = sc2idx(pilot_sc);
 
 rx_data_pilot = zeros(length(data_sc), num_ofdm_symbols);
@@ -339,9 +351,12 @@ end
 % Normalize once for plotting
 plotConstellation(rx_data_pilot, 'pilot-assisted received constellation', tx_data_syms(:));
 
-% % Description TBD
+% After pilot-assisted residual CFO correction:
+% - The constellation points are tighter and show no visible rotation compared to the constellation before pilot tracking in (7).
+% - Some residual spread remains due to noise and imperfect equalization, but the rotation issue is resolved.
 
-%(9)
+
+%(9)Demodulate the received signal at USRP 2 and calculate the bit error rate for this single frame. What is the BER? 
 rx_bits = zeros(2*length(data_sc), num_ofdm_symbols);
 
 for k = 1:num_ofdm_symbols
@@ -354,30 +369,13 @@ end
 bit_errors = sum(rx_bits(:) ~= tx_bits(:));
 ber = bit_errors / numel(tx_bits);
 fprintf("BER = %3f\n", ber);
+fprintf("achieve BER = 0 \n");
 
-%(10)
-%(10)
-% =========================================================================
 % (10) Change the modulation to 16-QAM and repeat the experiment
-% =========================================================================
-% 這題要把 modulation 改成 16-QAM，重新傳送與接收一個 frame。
-% 然後重複：
-%   1. frame synchronization
-%   2. CFO estimation
-%   3. CFO correction
-%   4. channel estimation
-%   5. equalization
-%   6. pilot-assisted residual phase correction
-%   7. plot constellation
-%
-% 注意：
-%   這裡沿用前面 Q3~Q9 的架構，只是 qam_num 改成 16。
 
 qam_num_16 = 16;
 
-% -------------------------------------------------------------------------
 % Generate 16-QAM OFDM frame
-% -------------------------------------------------------------------------
 [ofdm_data_16, tx_bits_16, tx_data_syms_16, pilot_syms_16] = ...
     gen_ofdm_data(num_ofdm_symbols, qam_num_16);
 
@@ -404,7 +402,6 @@ data_16 = repmat(tx_frame_16, N_repeat, 1);
 % RX capture length
 rx_length_16 = (N_repeat + 2) * length(tx_frame_16);
 
-fprintf("\n================ Q10: 16-QAM Transmission ================\n");
 fprintf("16-QAM frame length = %d samples\n", length(tx_frame_16));
 fprintf("16-QAM rx length    = %d samples\n", rx_length_16);
 
@@ -641,36 +638,19 @@ plotConstellation(rx_data_pilot_16, ...
     'Q10: 16-QAM Pilot-Assisted Received Constellation', ...
     tx_data_syms_16(:));
 
-fprintf("Q10 finished: 16-QAM CFO correction, equalization, and pilot-assisted constellation plotted.\n");
+% (11) what is the BER using 16-QAM modulation? How does it compare to the BER using 4-QAM in (9)?
 
-%(11)
-% =========================================================================
-% (11) Calculate BER for 16-QAM and compare with 4-QAM
-% =========================================================================
-% Q11 要做的事情：
-%   1. 將 Q10 pilot-assisted correction 後的 16-QAM symbols 解調成 bits
-%   2. 跟原本傳送的 tx_bits_16 比較
-%   3. 算出 16-QAM BER
-%   4. 跟 Q9 的 4-QAM BER 比較
-
-% -------------------------------------------------------------------------
 % Save 4-QAM BER from Q9
-% -------------------------------------------------------------------------
-% 前面 Q9 算完後，變數 ber 代表 4-QAM BER。
-% 為了避免後面被覆蓋，先存成 ber_4qam。
 if exist('ber_4qam', 'var') == 0
     ber_4qam = ber;
 end
 
-% -------------------------------------------------------------------------
 % Demodulate 16-QAM received symbols
-% -------------------------------------------------------------------------
 bits_per_symbol_16 = log2(qam_num_16);
 
 % rx_data_pilot_16 size:
 %   length(data_sc) x num_ofdm_symbols
-%
-% 對每個 OFDM symbol 分別做 16-QAM demodulation。
+
 rx_bits_16 = zeros(bits_per_symbol_16 * length(data_sc), num_ofdm_symbols);
 
 for k = 1:num_ofdm_symbols
@@ -682,23 +662,13 @@ for k = 1:num_ofdm_symbols
     rx_bits_16_k = qamdemod(rx_data_pilot_16_k, qam_num_16, ...
         'OutputType', 'bit', ...
         'UnitAveragePower', true);
-
-    % 存起來
     rx_bits_16(:, k) = rx_bits_16_k(:);
 end
 
-%-------------------------------------------------------------------------
-% Calculate 16-QAM BER
-% -------------------------------------------------------------------------
-% tx_bits_16 是 Q10 產生的 transmitted bits
 bit_errors_16 = sum(rx_bits_16(:) ~= tx_bits_16(:));
 
 ber_16qam = bit_errors_16 / numel(tx_bits_16);
 
-% -------------------------------------------------------------------------
-% Print results
-% -------------------------------------------------------------------------
-fprintf("\n================ Q11 BER Comparison ================\n");
 fprintf("4-QAM  BER from Q9  = %.6f\n", ber_4qam);
 fprintf("16-QAM BER from Q11 = %.6f\n", ber_16qam);
 fprintf("16-QAM bit errors   = %d / %d bits\n", bit_errors_16, numel(tx_bits_16));
@@ -713,9 +683,6 @@ else
     fprintf("Observation: 16-QAM BER is the same as 4-QAM BER in this trial.\n");
 end
 
-% -------------------------------------------------------------------------
-% Optional: bar plot comparing 4-QAM and 16-QAM BER
-% -------------------------------------------------------------------------
 figure;
 bar([ber_4qam, ber_16qam]);
 grid on;
@@ -723,7 +690,9 @@ set(gca, 'XTickLabel', {'4-QAM', '16-QAM'});
 ylabel('BER');
 title('Q11: BER Comparison between 4-QAM and 16-QAM');
 
-% (12)
+% (12)Transmit and receive 20 frames, each with 100 OFDM symbols using 16-QAM modulation. Calculate the BER for each of the 20 frames. Plot BER per frame vs frame number, and provide the total BER for the 20 frames.
+% The goal is to show that your transmission framework is robust enough that you can consistently collect usable experimental data. Thus, the BER should be rather consistent across different frames.
+
 validtrans = 0;
 frame_num = 20;
 BER_plot = zeros(frame_num,1);
@@ -892,7 +861,8 @@ title('BER per Frame');
 total_BER = mean(BER_plot(1:validtrans));
 fprintf("Total BER over %d valid frames = %.6f\n", validtrans, total_BER);
 
-%(13)
+%(13)Calculate the BER per subcarrier based on the received 20 frames. Plot BER vs subcarrier. Describe and analyze the BER figure you obtain. 
+% Is there frequency-dependent BER behavior? If some subcarriers experience higher bit errors, what do you think is the reason?
 BER_per_subcarrier = sc_err_cnt ./ sc_bit_cnt;  
 
 figure;
@@ -904,7 +874,7 @@ title('BER per Subcarrier over 20 Frames');
 
 % % description TBD
 
-%(14)
+%(14)Please select three (or more) transmission distances (please measure the distance).
 distance_num = 3;
 BER_distance = zeros(distance_num,1);
 distance_record = zeros(distance_num, 1);
@@ -1081,7 +1051,7 @@ end
 
 % TODO3: plot BER vs distance
 figure;
-scatter(distance_record, BER_distance);
+plot(distance_record, BER_distance, '-o', 'LineWidth', 2, 'MarkerSize', 8);
 grid on;
 xlabel('Transmission Distance (m)');
 ylabel('Total BER');

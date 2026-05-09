@@ -1,10 +1,38 @@
-%(1)
-% % Description TBD
+%(1)Describe your network configuration that allows the computer to control two USRPs.
+%% Network Configuration for Controlling Two USRPs
+% Computer side:
+%   IP address: 192.168.10.1
+%   Subnet mask: 255.255.255.0
+% 
+% USRP-2920 (TX):
+%   Platform: N200/N210/USRP2
+%   IP address: 192.168.10.2
+% 
+% USRP-2901 (RX):
+%   Platform: B210
+%   Serial Number: 34D9DC3
+% 
+% Explanation:
+%   The computer's Ethernet interface is configured to the same subnet (192.168.10.x) as the USRP-2920,
+%   so they can communicate directly over the wired Ethernet connection.
+%   The USRP-2901 is connected via USB 3.0 and is identified by its serial number, not by IP.
+%   MATLAB's UHD driver allows controlling both devices simultaneously.
 
-%(2)
-% % Description TBD
+%(2)Explain the strategy you employ to ensure complete capture of a whole frame at USRP 2.
+%% Strategy to Capture a Complete Frame
+% To capture a complete frame:
+% 1. The TX frame is repeated 10 times to make it much longer than one frame.
+%    This ensures at least one full frame falls entirely inside the RX buffer.
+% 2. At the receiver, we compute the matched filter output between the received signal and the known Short Training Sequence (STS). 
+%    The STS has good autocorrelation properties.
+% 3. When the matched filter peak exceeds a preset threshold, a frame is detected.
+% 4. The STS start is estimated from the peak position.
+% 5. The frame boundaries are determined by subtracting/adding the known padding, STS, LTS, and OFDM data lengths.
+% 6. We check that both start and end indices lie within the received buffer to guarantee a complete capture.
+% 
+% This approach is robust against random arrival time of the frame inside the long repeated transmission.
 
-%(3)
+%(3)plot the received signal in the time domain at USRP 2.
 % parameters
 FFT_size = 64;
 cp_size = 16;
@@ -45,6 +73,7 @@ OFDM_sr = 1e6;
 info = findsdru();
 disp(info(1))
 disp(info(2))
+plot_td_signal(tx_frame, fs, 'Tx Wi-Fi OFDM Frame', 'Real');
 
 % multi-tries transmission
 % Matched filter for STS detection
@@ -111,7 +140,7 @@ while ~success && retry_count < maxretries
     end
     
     if success
-        fprintf("GON GON\n")
+        fprintf("Good\n")
     else
         fprintf("Attempt TOO MANY TIMES, restarting usrp!\n");
         release(radio_Tx);
@@ -156,7 +185,7 @@ while ~success && retry_count < maxretries
     % Check BER of this frame
     bit_errors = sum(rx_bits(:) ~= tx_bits(:));
     
-    %%% discarding ass frame %%%
+    %%% discarding failed frame %%%
     ber = bit_errors / numel(tx_bits);
     fprintf("BER = %3f\n", ber);
 
@@ -166,12 +195,20 @@ while ~success && retry_count < maxretries
     %    continue;
     % end 
 end
-plot_td_signal(rx_frame, fs, 'Received Wi-Fi OFDM Frame', 'Real');
+frame_len = length(tx_frame);
+region_names = {'STS', 'LTS', 'OFDM Data'};
+region_ranges = [
+    pad_len+1, pad_len+length(sts);                      % STS
+    pad_len+length(sts)+1, pad_len+length(sts)+length(lts); % LTS
+    pad_len+length(sts)+length(lts)+1, pad_len+length(sts)+length(lts)+length(ofdm_data) % Data
+];
+plot_td_signal(rx_frame, fs, 'Received Wi-Fi OFDM Frame', 'Real', region_names, region_ranges);
 
-%(4)
+%(4)plot the received constellation (only the data tones). Do you observe the constellation rotating?
 plotConstellation(rx_data, 'received constellation without CFO');
+fprintf("Yes, received constellation without CFO rotate as whole circle\n");
 
-%(5)
+%(5)What is the estimated CFO? Also, please explain your CFO estimation process.
 fs_CFO = OFDM_sr;
 
 % Use STS repeated structure for CFO estimation
@@ -185,10 +222,19 @@ P_sts = sum(conj(rx_sts(1:end-D_sts)) .* rx_sts(1+D_sts:end));
 cfo_est = angle(P_sts) * fs_CFO / (2*pi*D_sts);
 
 fprintf("Estimated CFO from STS = %.2f Hz\n", cfo_est);
+%%
+% CFO Estimation Process:
+%   We use the STS for CFO estimation because:
+%   - STS has a periodicity of D = 16 samples
+%   - The phase rotation between two identical STS segments is proportional to the CFO
+%   - CFO = angle(P) * fs / (2*pi*D) where P = sum( conj(rx_sts(1:end-D)) .* rx_sts(1+D:end) )
+% 
+%   LTS could also be used, but STS gives a wider estimation range because of its shorter repetition period (16 vs 64).
+%   Here we only use STS for simplicity.
 
-% % Description TBD
+%(6)Apply CFO correction to the received frame and then estimate the channel. Plot the magnitude and the phase of the estimated channel vs subcarrier,
+% with zero subcarrier in the middle. Describe and discuss the figure.
 
-%(6)
 % CFO correction
 n = (0:length(rx_frame)-1).';
 rx_frame_cfo = rx_frame .* exp(-1j*2*pi*cfo_est*n/fs_CFO);
@@ -237,9 +283,20 @@ xlabel('Subcarrier Index');
 ylabel('Phase of H[k] (rad)');
 title('Estimated Channel Phase after CFO Correction');
 
-% % Description TBD
+%{
+Discussion of Estimated Channel:
 
-%(7)
+Magnitude plot:
+  - The channel magnitude varies across subcarriers due to frequency-selective fading.
+  - The edges (subcarriers -26 and +26) have lower magnitude because of the analog filter roll-off.
+  - Nulls at certain subcarriers indicate destructive multipath interference.
+
+Phase plot:
+  - The unwrapped phase is approximately linear, corresponding to a time delay (the channel impulse response delay).
+  - Some nonlinearities may be caused by residual CFO or measurement noise.
+%}
+
+%(7)Perform equalization on the received frame.
 rx_symbols_cfo = extractOFDMSymbols(rx_frame_cfo, data_start, FFT_size, cp_size, num_ofdm_symbols);
 rx_data_cfo = zeros(length(data_sc), num_ofdm_symbols);
 
@@ -257,9 +314,9 @@ for k = 1:num_ofdm_symbols
 end
 plotConstellation(rx_data_cfo, 'received constellation after CFO');
 
-% % Description TBD
+%There is still a little rotation exsist in constellation, but much smaller compared to (4)
 
-%(8)
+%(8)Use the four pilot tones to track the residual CFO and further correct the data tones accordingly
 pilot_idx = sc2idx(pilot_sc);
 
 rx_data_pilot = zeros(length(data_sc), num_ofdm_symbols);
@@ -293,8 +350,11 @@ end
 
 % Normalize once for plotting
 plotConstellation(rx_data_pilot, 'pilot-assisted received constellation', tx_data_syms(:));
+% 
+% After pilot-assisted residual CFO correction:
+  % - The constellation points are tighter and show no visible rotation compared to the constellation before pilot tracking in (7).
+  % - Some residual spread remains due to noise and imperfect equalization, but the rotation issue is resolved.
 
-% % Description TBD
 
 %(9)
 rx_bits = zeros(2*length(data_sc), num_ofdm_symbols);
