@@ -1,38 +1,14 @@
-%(1)Describe your network configuration that allows the computer to control two USRPs.
-%% Network Configuration for Controlling Two USRPs
-% Computer side:
-%   IP address: 192.168.10.1
-%   Subnet mask: 255.255.255.0
-% 
-% USRP-2920 (TX):
-%   Platform: N200/N210/USRP2
-%   IP address: 192.168.10.2
-% 
-% USRP-2901 (RX):
-%   Platform: B210
-%   Serial Number: 34D9DC3
-% 
-% Explanation:
-%   The computer's Ethernet interface is configured to the same subnet (192.168.10.x) as the USRP-2920,
-%   so they can communicate directly over the wired Ethernet connection.
-%   The USRP-2901 is connected via USB 3.0 and is identified by its serial number, not by IP.
-%   MATLAB's UHD driver allows controlling both devices simultaneously.
 
-%(2)Explain the strategy you employ to ensure complete capture of a whole frame at USRP 2.
-%% Strategy to Capture a Complete Frame
-% To capture a complete frame:
-% 1. The TX frame is repeated 10 times to make it much longer than one frame.
-%    This ensures at least one full frame falls entirely inside the RX buffer.
-% 2. At the receiver, we compute the matched filter output between the received signal and the known Short Training Sequence (STS). 
-%    The STS has good autocorrelation properties.
-% 3. When the matched filter peak exceeds a preset threshold, a frame is detected.
-% 4. The STS start is estimated from the peak position.
-% 5. The frame boundaries are determined by subtracting/adding the known padding, STS, LTS, and OFDM data lengths.
-% 6. We check that both start and end indices lie within the received buffer to guarantee a complete capture.
-% 
-% This approach is robust against random arrival time of the frame inside the long repeated transmission.
+%(1)
+% % Description TBD
 
-%(3)plot the received signal in the time domain at USRP 2.
+%(2)
+% % Description TBD
+
+%(3)
+
+%%construct 4 QAM frame for rx, tx
+
 % parameters
 FFT_size = 64;
 cp_size = 16;
@@ -64,12 +40,19 @@ data = repmat(tx_frame, N_repeat, 1);
 % set USRP
 fc = 885e6;
 tx_gain = 5;
-rx_gain = 5;
+rx_gain = 25;
 rx_length = (N_repeat + 2)*length(tx_frame);
 OFDM_sr = 1e6;
 [radio_Tx, radio_Rx] = USRP_init(fc, tx_gain, rx_gain, rx_length, OFDM_sr);
 
 % USRP connection check
+
+info = findsdru();
+disp(info(1))
+disp(info(2))
+release(radio_Tx);
+release(radio_Rx);
+pause(1);
 info = findsdru();
 disp(info(1))
 disp(info(2))
@@ -140,7 +123,7 @@ while ~success && retry_count < maxretries
     end
     
     if success
-        fprintf("Good\n")
+        fprintf("GON GON\n")
     else
         fprintf("Attempt TOO MANY TIMES, restarting usrp!\n");
         release(radio_Tx);
@@ -184,8 +167,8 @@ while ~success && retry_count < maxretries
     
     % Check BER of this frame
     bit_errors = sum(rx_bits(:) ~= tx_bits(:));
-    
-    %%% discarding failed frame %%%
+%% discarding ass frame %%%
+
     ber = bit_errors / numel(tx_bits);
     fprintf("BER = %3f\n", ber);
 
@@ -204,11 +187,11 @@ region_ranges = [
 ];
 plot_td_signal(rx_frame, fs, 'Received Wi-Fi OFDM Frame', 'Real', region_names, region_ranges);
 
-%(4)plot the received constellation (only the data tones). Do you observe the constellation rotating?
+%(4)
 plotConstellation(rx_data, 'received constellation without CFO');
-fprintf("Yes, received constellation without CFO rotate as whole circle\n");
 
-%(5)What is the estimated CFO? Also, please explain your CFO estimation process.
+%(5)
+
 fs_CFO = OFDM_sr;
 
 % Use STS repeated structure for CFO estimation
@@ -222,19 +205,10 @@ P_sts = sum(conj(rx_sts(1:end-D_sts)) .* rx_sts(1+D_sts:end));
 cfo_est = angle(P_sts) * fs_CFO / (2*pi*D_sts);
 
 fprintf("Estimated CFO from STS = %.2f Hz\n", cfo_est);
-%%
-% CFO Estimation Process:
-%   We use the STS for CFO estimation because:
-%   - STS has a periodicity of D = 16 samples
-%   - The phase rotation between two identical STS segments is proportional to the CFO
-%   - CFO = angle(P) * fs / (2*pi*D) where P = sum( conj(rx_sts(1:end-D)) .* rx_sts(1+D:end) )
-% 
-%   LTS could also be used, but STS gives a wider estimation range because of its shorter repetition period (16 vs 64).
-%   Here we only use STS for simplicity.
 
-%(6)Apply CFO correction to the received frame and then estimate the channel. Plot the magnitude and the phase of the estimated channel vs subcarrier,
-% with zero subcarrier in the middle. Describe and discuss the figure.
+% % Description TBD
 
+%(6)
 % CFO correction
 n = (0:length(rx_frame)-1).';
 rx_frame_cfo = rx_frame .* exp(-1j*2*pi*cfo_est*n/fs_CFO);
@@ -283,20 +257,9 @@ xlabel('Subcarrier Index');
 ylabel('Phase of H[k] (rad)');
 title('Estimated Channel Phase after CFO Correction');
 
-%{
-Discussion of Estimated Channel:
+% % Description TBD
 
-Magnitude plot:
-  - The channel magnitude varies across subcarriers due to frequency-selective fading.
-  - The edges (subcarriers -26 and +26) have lower magnitude because of the analog filter roll-off.
-  - Nulls at certain subcarriers indicate destructive multipath interference.
-
-Phase plot:
-  - The unwrapped phase is approximately linear, corresponding to a time delay (the channel impulse response delay).
-  - Some nonlinearities may be caused by residual CFO or measurement noise.
-%}
-
-%(7)Perform equalization on the received frame.
+%(7)
 rx_symbols_cfo = extractOFDMSymbols(rx_frame_cfo, data_start, FFT_size, cp_size, num_ofdm_symbols);
 rx_data_cfo = zeros(length(data_sc), num_ofdm_symbols);
 
@@ -314,9 +277,9 @@ for k = 1:num_ofdm_symbols
 end
 plotConstellation(rx_data_cfo, 'received constellation after CFO');
 
-%There is still a little rotation exsist in constellation, but much smaller compared to (4)
+% % Description TBD
 
-%(8)Use the four pilot tones to track the residual CFO and further correct the data tones accordingly
+%(8)
 pilot_idx = sc2idx(pilot_sc);
 
 rx_data_pilot = zeros(length(data_sc), num_ofdm_symbols);
@@ -350,11 +313,8 @@ end
 
 % Normalize once for plotting
 plotConstellation(rx_data_pilot, 'pilot-assisted received constellation', tx_data_syms(:));
-% 
-% After pilot-assisted residual CFO correction:
-  % - The constellation points are tighter and show no visible rotation compared to the constellation before pilot tracking in (7).
-  % - Some residual spread remains due to noise and imperfect equalization, but the rotation issue is resolved.
 
+% % Description TBD
 
 %(9)
 rx_bits = zeros(2*length(data_sc), num_ofdm_symbols);
@@ -831,42 +791,77 @@ while validtrans < frame_num
     end
     
     % Extract received frame
+    % rx_frame = buffer(start_point:frame_end);
+    % 
+    % % Extract OFDM symbols
+    % data_start = pad_len  + length(sts) + length(lts) + 1;
+    % rx_symbols = extractOFDMSymbols(rx_frame, data_start, FFT_size, cp_size, num_ofdm_symbols);
+    % 
+    % % Demodulate data tones into bits
+    % rx_bits = zeros(4*length(data_sc), num_ofdm_symbols);
+    % lts_f_known = fftshift(fft(lts(33:96)));
+    % first_lts_start = pad_len + length(sts) + 33;
+    % rx_lts_1 = extractLTS(rx_frame, first_lts_start, 1, FFT_size);
+    % H1 = estimateChannelFromLTS(rx_lts_1, lts_f_known);
+    % 
+    % rx_data = zeros(length(data_sc), num_ofdm_symbols);
+    % for k = 1:num_ofdm_symbols
+    %     % Remove CP + FFT + fftshift
+    %     Y = ofdmDemodSymbol(rx_symbols(:, k), FFT_size, cp_size);
+    % 
+    %     % Equalization
+    %     X_hat = equalizeSymbol(Y, H1);
+    % 
+    %     % Only take data subcarriers, not pilots
+    %     rx_data_syms_bn = X_hat(data_idx);
+    %     rx_data_syms = rx_data_syms_bn / sqrt(mean(abs(rx_data_syms_bn).^2)); %%% normalized the power to 1
+    %     rx_data(:, k) = rx_data_syms(:); 
+    % 
+    %     % 4-QAM demodulation
+    %     rx_bits_k = qamdemod(rx_data_syms, 16, 'OutputType', 'bit','UnitAveragePower', true);
+    % 
+    %     rx_bits(:, k) = rx_bits_k(:);
+    % end
+        % Extract received frame
     rx_frame = buffer(start_point:frame_end);
     
-    % Extract OFDM symbols
-    data_start = pad_len  + length(sts) + length(lts) + 1;
-    rx_symbols = extractOFDMSymbols(rx_frame, data_start, FFT_size, cp_size, num_ofdm_symbols);
+    % CFO estimation (STS)
+    rx_sts = rx_frame(pad_len+1 : pad_len+length(sts));
+    P_sts = sum(conj(rx_sts(1:end-16)) .* rx_sts(17:end));
+    cfo_est = angle(P_sts) * OFDM_sr / (2*pi*16);
     
-    % Demodulate data tones into bits
-    rx_bits = zeros(4*length(data_sc), num_ofdm_symbols);
-    lts_f_known = fftshift(fft(lts(33:96)));
+    % CFO correction
+    n = (0:length(rx_frame)-1).';
+    rx_frame_cfo = rx_frame .* exp(-1j*2*pi*cfo_est*n/OFDM_sr);
+    
+    % Channel estimation from two LTSs
+    data_start = pad_len + length(sts) + length(lts) + 1;
     first_lts_start = pad_len + length(sts) + 33;
-    rx_lts_1 = extractLTS(rx_frame, first_lts_start, 1, FFT_size);
-    H1 = estimateChannelFromLTS(rx_lts_1, lts_f_known);
+    lts_f_known = fftshift(fft(lts(33:96)));
+    H1c = estimateChannelFromLTS(extractLTS(rx_frame_cfo, first_lts_start, 1, FFT_size), lts_f_known);
+    H2c = estimateChannelFromLTS(extractLTS(rx_frame_cfo, first_lts_start, 2, FFT_size), lts_f_known);
+    H_est = (H1c + H2c) / 2;
     
-    rx_data = zeros(length(data_sc), num_ofdm_symbols);
+    % Extract symbols after CFO correction
+    rx_symbols_cfo = extractOFDMSymbols(rx_frame_cfo, data_start, FFT_size, cp_size, num_ofdm_symbols);
+    
+    % Equalize + pilot tracking + demod
+    rx_bits = zeros(4*length(data_sc), num_ofdm_symbols);
     for k = 1:num_ofdm_symbols
-        % Remove CP + FFT + fftshift
-        Y = ofdmDemodSymbol(rx_symbols(:, k), FFT_size, cp_size);
-        
-        % Equalization
-        X_hat = equalizeSymbol(Y, H1);
-    
-        % Only take data subcarriers, not pilots
+        Y = ofdmDemodSymbol(rx_symbols_cfo(:,k), FFT_size, cp_size);
+        X_hat = equalizeSymbol(Y, H_est);
+        theta = angle(sum(X_hat(pilot_idx) .* conj(pilot_syms(:,k))));
+        X_hat = X_hat * exp(-1j*theta);
         rx_data_syms_bn = X_hat(data_idx);
-        rx_data_syms = rx_data_syms_bn / sqrt(mean(abs(rx_data_syms_bn).^2)); %%% normalized the power to 1
-        rx_data(:, k) = rx_data_syms(:); 
-
-        % 4-QAM demodulation
-        rx_bits_k = qamdemod(rx_data_syms, 16, 'OutputType', 'bit','UnitAveragePower', true);
-    
-        rx_bits(:, k) = rx_bits_k(:);
+        % 不要 normalize！直接 demod
+        rx_bits_k = qamdemod(rx_data_syms_bn, 16, 'OutputType','bit','UnitAveragePower',true);
+        rx_bits(:,k) = rx_bits_k(:);
     end
     
     % Check BER of this frame
     bit_errors = sum(rx_bits(:) ~= tx_bits(:));
-    
-    %%% discarding ass frame %%%
+%% discarding ass frame %%%
+
     ber = bit_errors / numel(tx_bits);
     fprintf("BER = %3f\n", ber);
    
@@ -920,7 +915,7 @@ title('BER per Subcarrier over 20 Frames');
 % % description TBD
 
 %(14)
-distance_num = 3;
+distance_num = 0;
 BER_distance = zeros(distance_num,1);
 distance_record = zeros(distance_num, 1);
 
@@ -1024,43 +1019,72 @@ for d_idx = 1:distance_num
         end
         
         % Extract received frame
-        rx_frame = buffer(start_point:frame_end);
+        % rx_frame = buffer(start_point:frame_end);
+        % 
+        % % Extract OFDM symbols
+        % data_start = pad_len  + length(sts) + length(lts) + 1;
+        % rx_symbols = extractOFDMSymbols(rx_frame, data_start, FFT_size, cp_size, num_ofdm_symbols);
+        % 
+        % % Demodulate data tones into bits
+        % rx_bits = zeros(4*length(data_sc), num_ofdm_symbols);
+        % lts_f_known = fftshift(fft(lts(33:96)));
+        % first_lts_start = pad_len + length(sts) + 33;
+        % rx_lts_1 = extractLTS(rx_frame, first_lts_start, 1, FFT_size);
+        % H1 = estimateChannelFromLTS(rx_lts_1, lts_f_known);
+        % 
+        % rx_data = zeros(length(data_sc), num_ofdm_symbols);
+        % for k = 1:num_ofdm_symbols
+        %     % Remove CP + FFT + fftshift
+        %     Y = ofdmDemodSymbol(rx_symbols(:, k), FFT_size, cp_size);
+        % 
+        %     % Equalization
+        %     X_hat = equalizeSymbol(Y, H1);
+        % 
+        %     % Only take data subcarriers, not pilots
+        %     rx_data_syms_bn = X_hat(data_idx);
+        % 
+        %     rx_data_syms = rx_data_syms_bn / sqrt(mean(abs(rx_data_syms_bn).^2)); %%% normalized the power to 1
+        %     rx_data(:, k) = rx_data_syms(:); 
+        % 
+        %     % 4-QAM demodulation
+        %     rx_bits_k = qamdemod(rx_data_syms, 16, 'OutputType', 'bit','UnitAveragePower', true);
+        % 
+        %     rx_bits(:, k) = rx_bits_k(:);
+        % end
+        % CFO estimation (STS)
+        rx_sts = rx_frame(pad_len+1 : pad_len+length(sts));
+        P_sts = sum(conj(rx_sts(1:end-16)) .* rx_sts(17:end));
+        cfo_est = angle(P_sts) * OFDM_sr / (2*pi*16);
         
-        % Extract OFDM symbols
-        data_start = pad_len  + length(sts) + length(lts) + 1;
-        rx_symbols = extractOFDMSymbols(rx_frame, data_start, FFT_size, cp_size, num_ofdm_symbols);
+        % CFO correction
+        n = (0:length(rx_frame)-1).';
+        rx_frame_cfo = rx_frame .* exp(-1j*2*pi*cfo_est*n/OFDM_sr);
         
-        % Demodulate data tones into bits
-        rx_bits = zeros(4*length(data_sc), num_ofdm_symbols);
-        lts_f_known = fftshift(fft(lts(33:96)));
+        % Channel estimation from two LTSs
         first_lts_start = pad_len + length(sts) + 33;
-        rx_lts_1 = extractLTS(rx_frame, first_lts_start, 1, FFT_size);
-        H1 = estimateChannelFromLTS(rx_lts_1, lts_f_known);
+        H1c = estimateChannelFromLTS(extractLTS(rx_frame_cfo, first_lts_start, 1, FFT_size), lts_f_known);
+        H2c = estimateChannelFromLTS(extractLTS(rx_frame_cfo, first_lts_start, 2, FFT_size), lts_f_known);
+        H_est = (H1c + H2c) / 2;
         
-        rx_data = zeros(length(data_sc), num_ofdm_symbols);
+        % Extract symbols after CFO correction
+        rx_symbols_cfo = extractOFDMSymbols(rx_frame_cfo, data_start, FFT_size, cp_size, num_ofdm_symbols);
+        
+        % Equalize + pilot tracking + demod
         for k = 1:num_ofdm_symbols
-            % Remove CP + FFT + fftshift
-            Y = ofdmDemodSymbol(rx_symbols(:, k), FFT_size, cp_size);
-            
-            % Equalization
-            X_hat = equalizeSymbol(Y, H1);
-        
-            % Only take data subcarriers, not pilots
+            Y = ofdmDemodSymbol(rx_symbols_cfo(:,k), FFT_size, cp_size);
+            X_hat = equalizeSymbol(Y, H_est);
+            theta = angle(sum(X_hat(pilot_idx) .* conj(pilot_syms(:,k))));
+            X_hat = X_hat * exp(-1j*theta);
             rx_data_syms_bn = X_hat(data_idx);
-            
-            rx_data_syms = rx_data_syms_bn / sqrt(mean(abs(rx_data_syms_bn).^2)); %%% normalized the power to 1
-            rx_data(:, k) = rx_data_syms(:); 
-    
-            % 4-QAM demodulation
-            rx_bits_k = qamdemod(rx_data_syms, 16, 'OutputType', 'bit','UnitAveragePower', true);
-        
-            rx_bits(:, k) = rx_bits_k(:);
+            % 不要 normalize！直接 demod
+            rx_bits_k = qamdemod(rx_data_syms_bn, 16, 'OutputType','bit','UnitAveragePower',true);
+            rx_bits(:,k) = rx_bits_k(:);
         end
         
         % Check BER of this frame
         bit_errors = sum(rx_bits(:) ~= tx_bits(:));
-        
-        %%% discarding ass frame %%%
+%% discarding ass frame %%%
+
         ber = bit_errors / numel(tx_bits);
         fprintf("BER = %3f\n", ber);
        
@@ -1096,12 +1120,332 @@ end
 
 % TODO3: plot BER vs distance
 figure;
-scatter(distance_record, BER_distance);
+plot(distance_record, BER_distance, '-o', 'LineWidth', 2, 'MarkerSize', 8);
 grid on;
 xlabel('Transmission Distance (m)');
 ylabel('Total BER');
 title('Total BER vs Transmission Distance');
+% (15) Master clock rate, decimation/interpolation factors for 10 MHz
+fprintf("USRP-2920 (TX):\n");
+fprintf("  MasterClockRate    = 100 MHz (max 100 MHz)\n");
+fprintf("  InterpolationFactor (1 MHz)  = %d\n", 100e6/1e6);
+fprintf("  InterpolationFactor (10 MHz) = %d\n", 100e6/10e6);
+fprintf("\nUSRP-2901 / B210 (RX):\n");
+fprintf("  MasterClockRate    = 20 MHz\n");
+fprintf("  DecimationFactor (1 MHz)  = %d\n", 20e6/1e6);
+fprintf("  DecimationFactor (10 MHz) = %d\n", 20e6/10e6);
+fprintf("\nMax master clock rate:\n");
+fprintf("  USRP-2920: 100 MHz\n");
+fprintf("  USRP-2901 (B210): 56 MHz (but 20 MHz used for stability)\n");
 
+% =========================================================================
+% (16) & (17) Combined: 1 MHz vs 10 MHz Transmission Time and BER
+% =========================================================================
+% 策略：
+%   - 不重複傳送（N_repeat = 1），每次傳 1 個 frame、收 1 個 frame
+%   - 用迴圈跑 20 次，每次都是一次 TX + 一次 RX
+%   - 這樣 rx_length 會很小，不會爆 buffer
+%   - 計時從第一個成功 frame 開始，到第 20 個結束
+
+fprintf('\n================ Q16 & Q17: 1 MHz vs 10 MHz Comparison ================\n');
+
+% ---- 參數 ----
+sample_rates = [1e6, 10e6];
+num_frames_target = 20;
+fc = 885e6;
+tx_gain = 5;
+rx_gain = 5;
+
+% 儲存結果
+time_elapsed = zeros(1, 2);
+BER_all = cell(1, 2);           % 每個 sample rate 存 20 個 frame 的 BER
+
+for sr_idx = 1:2
+    
+    OFDM_sr = sample_rates(sr_idx);
+    scale_factor = OFDM_sr / 1e6;   % 1 或 10
+    
+    fprintf('\n===== Testing OFDM Sample Rate = %.0f MHz =====\n', OFDM_sr/1e6);
+    
+    % ---- USRP 設定 ----
+    inte_factor = 100e6 / OFDM_sr;
+    deci_factor = 20e6 / OFDM_sr;
+    
+    % ---- 產生 "一個" frame 需要的 STS, LTS, OFDM data ----
+    % 基礎 (1 MHz) 的版本
+    sts_base = gen_sts();
+    lts_base = gen_lts();
+    
+    [ofdm_data_base, ~, ~, ~] = gen_ofdm_data(num_ofdm_symbols, 16);
+    
+    % 升頻到目標 sample rate (如果是 1 MHz 就不變)
+    if scale_factor == 1
+        sts_used = sts_base;
+        lts_used = lts_base;
+        ofdm_data_used = ofdm_data_base;
+    else
+        sts_used = resample(sts_base, scale_factor, 1);
+        lts_used = resample(lts_base, scale_factor, 1);
+        ofdm_data_used = resample(ofdm_data_base, scale_factor, 1);
+    end
+    
+    % 正規化
+    sts_used = sts_used / rms(sts_used);
+    lts_used = lts_used / rms(lts_used);
+    ofdm_data_used = ofdm_data_used / rms(ofdm_data_used);
+    
+    pad_len_used = 500 * scale_factor;
+    
+    % ---- USRP 初始化 ----
+    % 只需要接收 "一個 frame 多一點" 的大小
+    single_frame_len = pad_len_used + length(sts_used) + length(lts_used) + ...
+                       length(ofdm_data_used) + pad_len_used;
+    rx_length = single_frame_len * 3;   % 3 倍就夠了，確保能完整抓到一個 frame
+    
+    fprintf('Single frame length = %d samples, rx_length = %d samples\n', ...
+        single_frame_len, rx_length);
+    
+    release(radio_Tx);
+    release(radio_Rx);
+    
+    radio_Tx = comm.SDRuTransmitter( ...
+        'Platform',            'N200/N210/USRP2', ...
+        'IPAddress',           '192.168.10.2', ...
+        'CenterFrequency',     fc, ...
+        'MasterClockRate',     100e6, ...
+        'InterpolationFactor',  inte_factor, ...
+        'Gain',                tx_gain);
+
+    radio_Rx = comm.SDRuReceiver( ...
+        'Platform',            'B210', ...
+        'SerialNum',           '34D9DC3', ...
+        'CenterFrequency',     fc, ...
+        'Gain',                rx_gain, ...
+        'SamplesPerFrame',     rx_length, ...
+        'MasterClockRate',     20e6, ...
+        'DecimationFactor',    deci_factor, ...
+        'OutputDataType',      'double');
+    
+    fprintf('Interpolation Factor = %d, Decimation Factor = %d\n', ...
+        inte_factor, deci_factor);
+    
+    % ---- FFT 參數（隨著 sample rate 改變） ----
+    FFT_size_used = 64 * scale_factor;
+    cp_size_used = 16 * scale_factor;
+    sym_len_used = FFT_size_used + cp_size_used;
+    
+    % data subcarrier indices
+    % 保留原本的 logical index mapping
+    active_sc  = [-26:-1 1:26];
+    pilot_sc = [-21 -7 7 21];
+    data_sc  = setdiff(active_sc, pilot_sc);
+    sc2idx = @(k) k + FFT_size_used/2 + 1;
+    data_idx = sc2idx(data_sc);
+    
+    % 先找出 LTS body 的起始位置（跳過 32-sample CP，scaled）
+    lts_cp_len = 32 * scale_factor;
+    lts_body_start = lts_cp_len + 1;
+    lts_body_end = lts_body_start + FFT_size_used - 1;
+    
+    % 取出 time-domain LTS body
+    lts_body_td = lts_used(lts_body_start : lts_body_end);
+    
+    % 轉到 frequency domain
+    lts_f_known = fftshift(fft(lts_body_td));
+    
+    % Matched filter
+    match_filter = conj(flipud(sts_used));
+    threshold = 0.003 * length(sts_used) * mean(abs(sts_used).^2);
+    
+    % ---- 傳輸 20 frames ----
+    BER_this_sr = zeros(num_frames_target, 1);
+    frames_collected = 0;
+    timer_started = false;
+    t_start = 0;
+    max_attempts_per_frame = 30;
+    
+    while frames_collected < num_frames_target
+        
+        % 產生一個新的 16-QAM frame
+        [ofdm_data_new, tx_bits, tx_data_syms, pilot_syms] = ...
+            gen_ofdm_data(num_ofdm_symbols, 16);
+        
+        if scale_factor == 1
+            ofdm_data_used = ofdm_data_new;
+        else
+            ofdm_data_used = resample(ofdm_data_new, scale_factor, 1);
+        end
+        ofdm_data_used = ofdm_data_used / rms(ofdm_data_used);
+        
+        % 組成 frame
+        tx_frame = [zeros(pad_len_used, 1); sts_used; lts_used; ...
+                    ofdm_data_used; zeros(pad_len_used, 1)];
+        tx_frame = tx_frame / max(abs(tx_frame));
+        
+        success = false;
+        for attempt = 1:max_attempts_per_frame
+            
+            % 傳送
+            tunderrun = radio_Tx(tx_frame);
+            
+            % 接收
+            [received_signal, ~, toverflow] = step(radio_Rx);
+            
+            if toverflow
+                continue;
+            end
+            
+            % Matched filter
+            corr = abs(conv(received_signal, match_filter));
+            maxval = max(corr);
+            
+            if maxval < threshold
+                continue;
+            end
+            
+            [~, peak_idx] = max(corr);
+            sts_start = peak_idx - length(sts_used) + 1;
+            frame_start = sts_start - pad_len_used;
+            frame_end = frame_start + length(tx_frame) - 1;
+            
+            if frame_start < 1 || frame_end > length(received_signal)
+                continue;
+            end
+            
+            % ---- 成功抓到一個完整 frame ----
+            if ~timer_started
+                t_start = tic;
+                timer_started = true;
+                fprintf('Timer started at frame 1\n');
+            end
+            
+            rx_frame = received_signal(frame_start:frame_end);
+            
+            % === CFO estimation ===
+            sts_start_in_frame = pad_len_used + 1;
+            D_sts = 16 * scale_factor;
+            rx_sts = rx_frame(sts_start_in_frame : sts_start_in_frame + length(sts_used) - 1);
+            P_sts = sum(conj(rx_sts(1:end-D_sts)) .* rx_sts(1+D_sts:end));
+            cfo_est = angle(P_sts) * OFDM_sr / (2*pi*D_sts);
+            
+            % === CFO correction ===
+            n = (0:length(rx_frame)-1).';
+            rx_frame_cfo = rx_frame .* exp(-1j*2*pi*cfo_est*n/OFDM_sr);
+            
+            % === Channel estimation ===
+            first_lts_start = pad_len_used + length(sts_used) + cp_size_used + 1;
+            rx_lts_1 = rx_frame_cfo(first_lts_start : first_lts_start + FFT_size_used - 1);
+            rx_lts_2 = rx_frame_cfo(first_lts_start + FFT_size_used : first_lts_start + 2*FFT_size_used - 1);
+            
+            H1 = estimateChannelFromLTS(rx_lts_1, lts_f_known);
+            H2 = estimateChannelFromLTS(rx_lts_2, lts_f_known);
+            H = (H1 + H2) / 2;
+            
+            % === Demodulate OFDM symbols ===
+            data_start = pad_len_used + length(sts_used) + length(lts_used) + 1;
+            rx_bits = zeros(4*length(data_sc), num_ofdm_symbols);
+            
+            for k = 1:num_ofdm_symbols
+                start_idx = data_start + (k-1)*sym_len_used;
+                end_idx = start_idx + sym_len_used - 1;
+                
+                if end_idx > length(rx_frame_cfo)
+                    break;
+                end
+                
+                sym = rx_frame_cfo(start_idx:end_idx);
+                sym_no_cp = sym(cp_size_used+1:end);
+                Y = fftshift(fft(sym_no_cp));
+                
+                X_hat = equalizeSymbol(Y, H);
+                rx_data_syms = X_hat(data_idx);
+                rx_data_syms = rx_data_syms / sqrt(mean(abs(rx_data_syms).^2));
+                
+                rx_bits_k = qamdemod(rx_data_syms, 16, 'OutputType', 'bit', 'UnitAveragePower', true);
+                rx_bits(:, k) = rx_bits_k(:);
+            end
+            
+            % === BER ===
+            bit_errors = sum(rx_bits(:) ~= tx_bits(:));
+            ber = bit_errors / numel(tx_bits);
+            
+            frames_collected = frames_collected + 1;
+            BER_this_sr(frames_collected) = ber;
+            
+            fprintf('Frame %d / %d, BER = %.6f\n', frames_collected, num_frames_target, ber);
+            
+            success = true;
+            break;
+        end
+        
+        if ~success
+            fprintf('Failed to capture frame, retrying...\n');
+        end
+    end
+    
+    time_elapsed(sr_idx) = toc(t_start);
+    BER_all{sr_idx} = BER_this_sr;
+    
+    fprintf('===== OFDM Sample Rate = %.0f MHz: Time = %.2f s, Avg BER = %.6f =====\n', ...
+        OFDM_sr/1e6, time_elapsed(sr_idx), mean(BER_this_sr));
+    
+    release(radio_Tx);
+    release(radio_Rx);
+end
+
+% =========================================================================
+% 畫圖：時間比較
+% =========================================================================
+fprintf('\n================ Q16 Results ================\n');
+fprintf('1 MHz  time for 20 frames: %.2f s\n', time_elapsed(1));
+fprintf('10 MHz time for 20 frames: %.2f s\n', time_elapsed(2));
+if time_elapsed(2) > 0
+    fprintf('Speedup: %.2fx\n', time_elapsed(1) / time_elapsed(2));
+end
+
+figure;
+bar(time_elapsed);
+grid on;
+set(gca, 'XTickLabel', {'1 MHz', '10 MHz'});
+ylabel('Time (seconds)');
+title('Q16: Transmission Time for 20 Frames');
+
+% =========================================================================
+% 畫圖：BER per frame 比較
+% =========================================================================
+figure;
+plot(1:num_frames_target, BER_all{1}, '-o', 'LineWidth', 1.5, 'DisplayName', '1 MHz');
+hold on;
+plot(1:num_frames_target, BER_all{2}, '-s', 'LineWidth', 1.5, 'DisplayName', '10 MHz');
+grid on;
+xlabel('Frame Number');
+ylabel('BER');
+title('Q17: BER vs Frame Number (1 MHz vs 10 MHz)');
+legend;
+
+fprintf('\n================ Q17 Analysis ================\n');
+fprintf('1 MHz  average BER = %.6f\n', mean(BER_all{1}));
+fprintf('10 MHz average BER = %.6f\n', mean(BER_all{2}));
+
+%{
+(16) Discussion:
+  - At 10 MHz, the frame duration is 1/10 of 1 MHz.
+  - Therefore, 20 frames should take roughly 1/10 of the time.
+  - Small overhead may come from USRP re-initialization between
+    frames and MATLAB processing time.
+
+(17) Discussion:
+  - The synchronization method (STS matched filter) works at both
+    sample rates because the correlation property is preserved.
+  - At 10 MHz, the STS repetition period D becomes 160 (instead of 16),
+    so the CFO estimation formula must be updated accordingly.
+  - 10 MHz may show slightly higher BER because:
+      * Wider bandwidth captures more noise
+      * RX front-end filtering effects are different
+      * Timing jitter has proportionally larger effect
+%}
+ 
+%% Function
 
 function [tx_usrp, rx_usrp] = USRP_init(fc, tx_gain, rx_gain, rx_length, OFDM_sr)
     inte_factor = 100e6 / OFDM_sr;
