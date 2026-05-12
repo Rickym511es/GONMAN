@@ -2506,24 +2506,29 @@ function plotConstellation(sym, plot_title, ref_sym)
     grid on;
 end
 
-%% =========================================================================
-%%
-% 
-%  22. transmitDualTxReceiveSingleFrame_existing
-%
-%% =========================================================================
+
+
+%%% Function FOR Q9
+function tx_dual_out = normalizeDualTxTotalRMS(tx_dual_in, target_total_rms)
+% normalizeDualTxTotalRMS
+% Normalize total RMS power across two TX antennas.
+% total_power[n] = |tx1[n]|^2 + |tx2[n]|^2
+
+    current_total_rms = sqrt(mean(sum(abs(tx_dual_in).^2, 2)));
+
+    if ~isfinite(current_total_rms) || current_total_rms < 1e-12
+        error('normalizeDualTxTotalRMS: input waveform power is too small.');
+    end
+
+    tx_dual_out = tx_dual_in * (target_total_rms / current_total_rms);
+end
 
 function rx_frame = transmitDualTxReceiveSingleFrame_existing( ...
     radio_Tx, radio_Rx, ...
     tx_waveform_dual, frame_len, ...
     sts, pad_len, threshold, maxattempts, label_name)
 % transmitDualTxReceiveSingleFrame_existing
-% 使用已存在的 radio_Tx / radio_Rx 傳送 dual-TX waveform，
-% 並用 STS matched filter 抓出完整 received frame。
-%
-% 跟 transmitDualTxReceiveSingleFrame 的差別：
-%   這個版本不會自己 init / release USRP，
-%   而是用外面傳進來的 radio_Tx / radio_Rx。
+% Transmit one dual-TX waveform and extract one complete received frame.
 
     match_filter = conj(flipud(sts(:)));
     sts_len = length(sts);
@@ -2535,6 +2540,11 @@ function rx_frame = transmitDualTxReceiveSingleFrame_existing( ...
 
         fprintf('\n[%s] attempt %d / %d\n', label_name, attempt, maxattempts);
 
+        % %% Flush old RX samples
+        % for k = 1:8
+        %     step(radio_Rx);
+        % end
+
         %% Transmit
         tx_underrun = radio_Tx(tx_waveform_dual);
 
@@ -2542,7 +2552,7 @@ function rx_frame = transmitDualTxReceiveSingleFrame_existing( ...
             fprintf('[%s] TX underrun occurred.\n', label_name);
         end
 
-        pause(0.02);
+        pause(0.002);
 
         %% Receive
         [received_signal, len, overflow] = step(radio_Rx);
@@ -2580,6 +2590,8 @@ function rx_frame = transmitDualTxReceiveSingleFrame_existing( ...
 
         if frame_start < 1 || frame_end > length(received_signal)
             fprintf('[%s] incomplete frame. Try next attempt.\n', label_name);
+            fprintf('[%s] frame_start = %d, frame_end = %d, rx_len = %d\n', ...
+                label_name, frame_start, frame_end, length(received_signal));
             continue;
         end
 
@@ -2596,35 +2608,15 @@ function rx_frame = transmitDualTxReceiveSingleFrame_existing( ...
     if ~success
         error('[%s] failed: cannot detect complete frame.', label_name);
     end
+
+    %% Plot result
+    figure;
+    plot(real(rx_frame));
+    grid on;
+    title(['Received frame: ', label_name]);
+    xlabel('Sample Index');
+    ylabel('Real Part');
 end
-
-%% =========================================================================
-%%
-% 
-%  23. normalizeDualTxTotalRMS
-%
-%% =========================================================================
-
-function tx_dual_out = normalizeDualTxTotalRMS(tx_dual_in, target_total_rms)
-% normalizeDualTxTotalRMS
-% Normalize total RMS power across two TX antennas.
-% total_power[n] = |tx1[n]|^2 + |tx2[n]|^2
-
-    current_total_rms = sqrt(mean(sum(abs(tx_dual_in).^2, 2)));
-
-    if ~isfinite(current_total_rms) || current_total_rms < 1e-12
-        error('normalizeDualTxTotalRMS: input waveform power is too small.');
-    end
-
-    tx_dual_out = tx_dual_in * (target_total_rms / current_total_rms);
-end
-
-%% =========================================================================
-%%
-% 
-%  24. calcLtsSNRFromFrame
-%
-%% =========================================================================
 
 function [snr_per_sc_dB, H_avg, cfo_hat] = calcLtsSNRFromFrame( ...
     rx_frame, sts, lts, pad_len, FFT_size, fs, lts_f_known)
@@ -2645,21 +2637,29 @@ function [snr_per_sc_dB, H_avg, cfo_hat] = calcLtsSNRFromFrame( ...
     rx_frame = rx_frame(:);
     rx_frame = rx_frame - mean(rx_frame);
 
-    %% LTS positions
+    %% ------------------------------------------------------------
+    % 1. LTS positions
+    %% ------------------------------------------------------------
     first_lts_start = pad_len + length(sts) + 33;
 
     rx_lts1_raw = extractLTS(rx_frame, first_lts_start, 1, FFT_size);
     rx_lts2_raw = extractLTS(rx_frame, first_lts_start, 2, FFT_size);
 
-    %% CFO estimation using the two LTS bodies
+    %% ------------------------------------------------------------
+    % 2. CFO estimation using the two LTS bodies
+    %% ------------------------------------------------------------
     phase_diff = angle(sum(conj(rx_lts1_raw) .* rx_lts2_raw));
     cfo_hat = phase_diff * fs / (2*pi*FFT_size);
 
-    %% CFO correction
+    %% ------------------------------------------------------------
+    % 3. CFO correction
+    %% ------------------------------------------------------------
     n = (0:length(rx_frame)-1).';
     rx_cfo = rx_frame .* exp(-1j * 2*pi * cfo_hat * n / fs);
 
-    %% Channel estimates from LTS1 and LTS2
+    %% ------------------------------------------------------------
+    % 4. Channel estimates from LTS1 and LTS2
+    %% ------------------------------------------------------------
     rx_lts1 = extractLTS(rx_cfo, first_lts_start, 1, FFT_size);
     rx_lts2 = extractLTS(rx_cfo, first_lts_start, 2, FFT_size);
 
@@ -2668,7 +2668,9 @@ function [snr_per_sc_dB, H_avg, cfo_hat] = calcLtsSNRFromFrame( ...
 
     H_avg = (H1 + H2) / 2;
 
-    %% SNR estimate
+    %% ------------------------------------------------------------
+    % 5. SNR estimate
+    %% ------------------------------------------------------------
     valid_idx = abs(lts_f_known(:)) > 1e-12;
 
     sig_pow = abs(H_avg).^2;

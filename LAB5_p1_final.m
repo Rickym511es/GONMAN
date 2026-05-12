@@ -1119,7 +1119,7 @@ while frames_done < frame_num
 
     if ~success_i
         fprintf("[10 MHz] Sync failed, restarting USRP...\n");
-        release(radio_Tx_10); release(radio_Rx_10); pause(1);
+        release(radio_Tx_10); release(radio_Rx_10);
         radio_Tx_10 = comm.SDRuTransmitter( ...
             'Platform','N200/N210/USRP2','IPAddress','192.168.10.2', ...
             'CenterFrequency',fc,'MasterClockRate',100e6, ...
@@ -1147,11 +1147,17 @@ fprintf("Observation: 10 MHz completes 20 frames approximately 10x faster\n");
 fprintf("because the same number of baseband samples are transmitted/received\n");
 fprintf("with a 10x higher sample rate, reducing frame duration 10x.\n");
 
+overhead_10MHz = time_10MHz - time_10MHz_theory;
+time_1MHz_est  = time_1MHz_theory + overhead_10MHz;
+
+fprintf("Estimated 1 MHz  total time: %.3f s\n", time_1MHz_est);
+fprintf("Measured 10 MHz total time: %.3f s\n", time_10MHz);
+
 figure;
-bar([time_1MHz_theory, time_10MHz]);
-set(gca, 'XTickLabel', {'1 MHz (theor.)', '10 MHz (meas.)'});
-ylabel('Time (s)');
-title('Q16: Time to Receive 20 Frames');
+bar([time_1MHz_est, time_10MHz]);
+set(gca, 'XTickLabel', {'1 MHz (est.)', '10 MHz (meas.)'});
+ylabel('Total Time for 20 Frames (s)');
+title('Q16: Total Transmission Time — 1 MHz vs 10 MHz');
 grid on;
 
 % =========================================================================
